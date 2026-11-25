@@ -40,8 +40,8 @@ export function createApp(db: Db, cfg: Config, verify?: GoogleVerifier) {
   app.use('/api', api);
 
   app.use(express.static(PUBLIC, { index: 'index.html', maxAge: cfg.production ? '1h' : 0 }));
-  // Production links (/p/<id>) open the same page.
-  app.get('/p/:id', (_req, res) => res.sendFile(PUBLIC + 'index.html'));
+  // Links from before productions moved to ?p=<id>.
+  app.get('/p/:id', (req, res) => res.redirect(301, `/?p=${encodeURIComponent(req.params.id)}`));
 
   const onError: ErrorRequestHandler = (err, _req, res, _next) => {
     if (err instanceof HttpError) return void res.status(err.status).json({ error: err.message, ...err.body });

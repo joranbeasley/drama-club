@@ -76,6 +76,8 @@ body { background: var(--surface); color: var(--ink); font-family: var(--f-ui); 
 .signin .card { width: min(420px, 100%); background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 28px 24px; text-align: center; }
 .signin .logo.big { font-size: 44px; margin-bottom: 8px; }
 .gbtn { display: flex; justify-content: center; min-height: 44px; }
+.local-opt { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 16px; }
+.local-opt .note { margin: 8px 0 0; }
 .dev { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 14px; }
 .dev input { flex: 1; min-width: 0; }
 .note { color: var(--muted); font-size: 13px; margin: 0 0 8px; }

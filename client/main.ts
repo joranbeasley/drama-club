@@ -11,6 +11,7 @@ import {
   type GraphJSON,
 } from 'mobile-nodemap';
 import { api, ApiError, type Production, type ProductionSummary, type User } from './api.ts';
+import { hasServer, localStore, serverStore, type ProductionStore } from './store.ts';
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector(sel) as T;
 const local = {
@@ -155,6 +156,7 @@ themeSel.addEventListener('change', () => {
 
 // ------------------------------------------------------------------ productions
 
+let store: ProductionStore = serverStore;
 let productions: ProductionSummary[] = [];
 let current: Production | undefined;
 const prodSel = $<HTMLSelectElement>('#prod');
@@ -179,8 +181,7 @@ const exampleGraph = (): GraphJSON => ({ ...structuredClone(drama2Graph.examples
 async function open(id: string, { fresh = false } = {}) {
   await flush();
   hideBanner();
-  const { production } = await api.get<{ production: Production }>(`/productions/${id}`);
-  show(production, fresh);
+  show(await store.get(id), fresh);
 }
 
 function show(p: Production, fresh = false) {
@@ -202,15 +203,15 @@ function show(p: Production, fresh = false) {
   ed.history?.reset();
   ed.select({});
   requestAnimationFrame(() => (fresh ? void ed.autoLayout({ animate: false }) : ed.fit()));
-  local.set('last', p.id);
-  if (location.pathname !== `/p/${p.id}`) history.replaceState(null, '', `/p/${p.id}`);
+  local.set(`last:${store.mode}`, p.id);
+  setUrl(p.id);
   renderPicker();
   setSave('saved');
 }
 
 async function create(title: string, graphJson: GraphJSON) {
   await flush();
-  const { production } = await api.post<{ production: Production }>('/productions', { title, graph: graphJson });
+  const production = await store.create(title, graphJson);
   upsertSummary(production);
   show(production, true);
 }
@@ -253,13 +254,13 @@ menu($('#more'), $('#more-menu'), (act) => {
         run(async () => {
           clearTimeout(saveTimer);
           dirty = false;
-          await api.del(`/productions/${p.id}`);
+          await store.remove(p.id);
           productions = productions.filter((x) => x.id !== p.id);
           current = undefined;
-          local.set('last', null);
+          local.set(`last:${store.mode}`, null);
           if (productions[0]) await open(productions[0].id);
           else {
-            history.replaceState(null, '', '/');
+            setUrl(null);
             graph.load(blankGraph());
             renderPicker();
             setSave('');
@@ -296,7 +297,7 @@ let retryMs = 2000;
 
 function setSave(state: 'saved' | 'saving' | 'unsaved' | 'error' | '', text?: string) {
   saveEl.dataset.state = state;
-  saveEl.textContent = text ?? { saved: 'Saved', saving: 'Saving…', unsaved: 'Unsaved changes', error: 'Not saved', '': '' }[state];
+  saveEl.textContent = text ?? { saved: store.mode === 'local' ? 'Saved on this device' : 'Saved', saving: 'Saving…', unsaved: 'Unsaved changes', error: 'Not saved', '': '' }[state];
 }
 
 graph.on('change', (e) => {
@@ -319,7 +320,7 @@ async function save(fields: { title?: string; force?: boolean } = {}): Promise<v
   setSave('saving');
   saving = (async () => {
     try {
-      const { production } = await api.put<{ production: ProductionSummary }>(`/productions/${p.id}`, {
+      const production = await store.update(p.id, {
         ...(sendGraph ? { graph: graph.toJSON() } : {}),
         ...(fields.title ? { title: fields.title } : {}),
         ...(fields.force ? { force: true } : { version: p.version }),
@@ -393,7 +394,13 @@ menu($('#user'), $('#user-menu'), (act) => {
     void run(async () => {
       await flush();
       await api.post('/auth/logout', {});
-      location.href = '/';
+      location.href = location.pathname;
+    });
+  } else if (act === 'signin') {
+    void run(async () => {
+      await flush();
+      local.set('mode', null);
+      location.href = location.pathname;
     });
   } else if (act === 'meshy') {
     const body = html(`<p>Picture fields can generate images with Meshy. Your key stays in this browser and is only sent to Meshy.</p>
@@ -421,6 +428,10 @@ async function showSignIn() {
   setState('out');
   const errEl = $('#signin-err');
   const cfg = await api.get<{ googleClientId: string | null; devLogin: boolean }>('/config');
+  $('#go-local').onclick = () => {
+    local.set('mode', 'local');
+    void run(startLocal);
+  };
   const dev = $<HTMLFormElement>('#dev-login');
   dev.hidden = !cfg.devLogin;
   dev.onsubmit = (e) => {
@@ -458,18 +469,53 @@ async function signInAgain() {
   location.reload();
 }
 
+/** The production in the address (?p=<id>), and keeping it there. */
+const urlProduction = () => new URLSearchParams(location.search).get('p');
+function setUrl(id: string | null) {
+  const u = new URL(location.href);
+  if (id) u.searchParams.set('p', id);
+  else u.searchParams.delete('p');
+  if (u.href !== location.href) history.replaceState(null, '', u);
+}
+
+let serverAvailable = false;
+
 async function boot() {
+  serverAvailable = await hasServer();
+  // No server (GitHub Pages, opened from a file), or the person chose to stay on this device.
+  if (!serverAvailable || local.get('mode') === 'local') return startLocal();
   const me = await api.get<{ user: User | null }>('/me');
   user = me.user;
   if (!user) return showSignIn();
+  store = serverStore;
   showUser(user);
+  $('[data-act="signin"]').hidden = true;
+  await startEditing();
+}
+
+/** Productions kept in this browser only: no account needed. */
+async function startLocal() {
+  store = localStore;
+  const av = $('#user');
+  av.textContent = '📱';
+  av.style.backgroundImage = '';
+  $('#who').replaceChildren(
+    html(`<b>Not signed in</b>Productions are saved in this browser only. Download them as JSON to back them up or move them.`),
+  );
+  $('[data-act="logout"]').hidden = true;
+  // Signing in is only possible where there is a server.
+  $('[data-act="signin"]').hidden = !serverAvailable;
+  await startEditing();
+}
+
+async function startEditing() {
   setState('in');
-  ({ productions } = await api.get<{ productions: ProductionSummary[] }>('/productions'));
-  const fromUrl = /^\/p\/([\w-]+)/.exec(location.pathname)?.[1];
-  const want = [fromUrl, local.get('last'), productions[0]?.id].find((id) => id && productions.some((p) => p.id === id));
-  if (fromUrl && !want) banner('That production isn’t one of yours, or it was deleted.');
+  productions = await store.list();
+  const fromUrl = urlProduction();
+  const want = [fromUrl, local.get(`last:${store.mode}`), productions[0]?.id].find((id) => id && productions.some((p) => p.id === id));
+  if (fromUrl && !want) banner(store.mode === 'local' ? 'That production isn’t saved in this browser.' : 'That production isn’t one of yours, or it was deleted.');
   if (!want) {
-    history.replaceState(null, '', '/');
+    setUrl(null);
     renderPicker();
     return;
   }

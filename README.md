@@ -15,6 +15,12 @@ npm run dev                 # http://localhost:3000, rebuilds the client and res
 
 The server applies database migrations (`db/migrations/*.sql`) when it starts; `npm run migrate` does it on its own.
 
+## Without a server: GitHub Pages and browser storage
+
+The app also runs as plain static files. When there is no Drama Club server behind the page (GitHub Pages, any static host), or someone taps **Continue without an account** on the sign-in screen, productions are kept in that browser (IndexedDB, which has room for pictures, unlike `localStorage`'s ~5 MB). Everything works the same (autosave, the example, JSON export and import, the two-tab conflict check), but nothing leaves the device: use **Download as JSON** to back up or move a production, and **Import JSON** to bring it into a signed-in account later.
+
+`.github/workflows/pages.yml` builds `public/` on every push and publishes the default branch to Pages. To turn it on: **Settings → Pages → Build and deployment → Source: GitHub Actions**, then re-run the workflow (or push). The site is `https://<owner>.github.io/drama-club/`. Productions open as `?p=<id>`.
+
 ## Google sign-in
 
 1. In Google Cloud Console → APIs & Services → Credentials, create an **OAuth client ID** of type **Web application**.
@@ -60,6 +66,8 @@ test/          API tests against a real Postgres
 **API** (all JSON, all under `/api`): `GET /config`, `GET /me`, `POST /auth/google {credential}`, `POST /auth/logout`, `GET /productions`, `POST /productions {title, graph?}`, `GET|PUT|DELETE /productions/:id`. A production's `graph` is mobile-nodemap `GraphJSON` (type `drama2`).
 
 **Saving.** Edits save automatically after a short pause. Each save sends the `version` it was based on; if the production was saved elsewhere since (another tab or phone), the server answers `409` and the app offers **Load theirs** or **Keep mine**. Offline saves retry with back-off, and closing the tab with unsaved changes asks first.
+
+**Browser-only mode.** `client/store.ts` has two stores behind one interface: `serverStore` (the API) and `localStore` (IndexedDB), chosen at start-up by probing `api/health`.
 
 **Image generation.** Picture fields can generate images with Meshy using each user's own API key (account menu → Image generation key), kept in their browser and sent only to Meshy.
 
