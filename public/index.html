@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Drama Club</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div class="app" id="app" data-state="loading">
+  <header class="bar">
+    <div class="brand"><span class="logo" aria-hidden="true">🎬</span><span class="brand-name">Drama Club</span></div>
+    <div class="prod" data-when="in">
+      <select id="prod" class="pick" aria-label="Production"></select>
+      <button type="button" class="btn" id="new" title="New production"><span class="glyph">+</span><span class="label">New</span></button>
+      <button type="button" class="btn" id="more" aria-haspopup="menu" aria-expanded="false" title="More"><span class="glyph">⋯</span></button>
+      <div class="menu" id="more-menu" role="menu" hidden>
+        <button type="button" role="menuitem" data-act="rename">Rename…</button>
+        <button type="button" role="menuitem" data-act="duplicate">Duplicate</button>
+        <button type="button" role="menuitem" data-act="export">Download as JSON</button>
+        <button type="button" role="menuitem" data-act="import">Import JSON…</button>
+        <hr>
+        <button type="button" role="menuitem" data-act="delete" class="danger">Delete…</button>
+      </div>
+    </div>
+    <div class="me" data-when="in">
+      <span id="save" class="save" role="status" aria-live="polite"></span>
+      <select id="theme" class="pick theme" aria-label="Theme"></select>
+      <button type="button" class="avatar" id="user" aria-haspopup="menu" aria-expanded="false" title="Account"></button>
+      <div class="menu right" id="user-menu" role="menu" hidden>
+        <div class="who" id="who"></div>
+        <button type="button" role="menuitem" data-act="meshy">Image generation key…</button>
+        <hr>
+        <button type="button" role="menuitem" data-act="logout">Sign out</button>
+      </div>
+    </div>
+  </header>
+  <div class="sub" data-when="in">
+    <span id="status" role="status">ready</span>
+  </div>
+
+  <main id="canvas" aria-label="Production boards" data-when="in"></main>
+
+  <section class="empty" id="empty" data-when="in" hidden>
+    <h1>Start your first production</h1>
+    <p>A production is a set of boards: cast, locations, props, shots, scenes and episodes, linked together. Start blank, or from the example term to see how it fits.</p>
+    <div class="row">
+      <button type="button" class="btn primary" data-template="blank">Blank production</button>
+      <button type="button" class="btn" data-template="example">From the example</button>
+    </div>
+  </section>
+
+  <section class="signin" data-when="out">
+    <div class="card">
+      <div class="logo big" aria-hidden="true">🎬</div>
+      <h1>Drama Club</h1>
+      <p>Plan your productions on your phone: the cast and their costumes, locations, props, shots, scenes and episodes, with pictures, shot lists and video scripts.</p>
+      <div id="gbtn" class="gbtn"></div>
+      <form id="dev-login" class="dev" hidden>
+        <p class="note">Development sign-in (no Google)</p>
+        <div class="row"><input name="email" type="email" required placeholder="you@example.com" autocomplete="email"><button class="btn primary">Sign in</button></div>
+      </form>
+      <p class="err" id="signin-err" role="alert"></p>
+    </div>
+  </section>
+
+  <div class="banner" id="banner" role="alert" hidden></div>
+</div>
+
+<dialog id="dlg">
+  <form method="dialog" id="dlg-form">
+    <h2 id="dlg-title"></h2>
+    <div id="dlg-body"></div>
+    <div class="row end">
+      <button type="button" class="btn" value="cancel" id="dlg-cancel">Cancel</button>
+      <button class="btn primary" value="ok" id="dlg-ok">OK</button>
+    </div>
+  </form>
+</dialog>
+<input type="file" id="import-file" accept="application/json,.json" hidden>
+<script src="/app.js"></script>
+</body>
+</html>
