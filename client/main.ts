@@ -12,6 +12,7 @@ import {
 } from 'mobile-nodemap';
 import { api, ApiError, type Production, type ProductionSummary, type User } from './api.ts';
 import { hasServer, localStore, serverStore, type ProductionStore } from './store.ts';
+import { hasInlinePhotos, withPhotosInline } from './media.ts';
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector(sel) as T;
 const local = {
@@ -207,6 +208,12 @@ function show(p: Production, fresh = false) {
   setUrl(p.id);
   renderPicker();
   setSave('saved');
+  // Made before pictures moved to R2 (or imported): save once now to move its photos out.
+  if (store.mode === 'server' && hasInlinePhotos(p.graph)) {
+    dirty = true;
+    setSave('saving', 'Moving pictures…');
+    void save();
+  }
 }
 
 async function create(title: string, graphJson: GraphJSON) {
@@ -241,10 +248,16 @@ menu($('#more'), $('#more-menu'), (act) => {
   } else if (act === 'duplicate') {
     void run(() => create(`${p.title} (copy)`, graph.toJSON()));
   } else if (act === 'export') {
-    const blob = new Blob([JSON.stringify({ title: p.title, graph: graph.toJSON() }, null, 2)], { type: 'application/json' });
-    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `${p.title.replace(/[^\w -]+/g, '').trim() || 'production'}.json` });
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    // Pictures go in the file itself, so it opens anywhere (another account, browser-only mode).
+    void run(async () => {
+      setSave('saving', 'Preparing download…');
+      const json = await withPhotosInline(graph.toJSON());
+      setSave(dirty ? 'unsaved' : 'saved');
+      const blob = new Blob([JSON.stringify({ title: p.title, graph: json }, null, 2)], { type: 'application/json' });
+      const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `${p.title.replace(/[^\w -]+/g, '').trim() || 'production'}.json` });
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    });
   } else if (act === 'import') {
     $('#import-file').click();
   } else if (act === 'delete') {

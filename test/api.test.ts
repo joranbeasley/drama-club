@@ -47,6 +47,8 @@ const map = (n: number, extra = '') => ({ version: 1, type: 'drama2', nodes: Arr
 const send = (method: string, path: string, g: ReturnType<typeof map>, cookie: string) =>
   req(method, path, { raw: JSON.stringify(g), cookie, headers: { 'x-node-count': String(g.nodes.length) } });
 
+const expect201 = (status: number) => assert.equal(status, 201);
+
 describe('api on workers', () => {
   it('has sessions', async () => {
     assert.equal((await req('GET', '/me')).body.user, null);
@@ -104,6 +106,37 @@ describe('api on workers', () => {
     assert.equal((await req('PATCH', `/productions/${p.id}`, { body: { title: 'Old', version: 1 }, cookie: ana })).status, 409);
     assert.equal((await req('DELETE', `/productions/${p.id}`, { cookie: ana })).status, 204);
     assert.equal((await req('GET', `/productions/${p.id}`, { cookie: ana })).status, 404);
+  });
+
+  it('stores pictures in R2, once each, for their owners only', async () => {
+    const ana = await signIn('ana@club.test');
+    const ben = await signIn('ben@club.test');
+    const png = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='), (c) => c.charCodeAt(0));
+    const up = (cookie: string, body: BodyInit, type = 'image/png') => fetch(base + '/images', { method: 'POST', headers: { 'content-type': type, cookie }, body });
+    const r1 = await up(ana, png);
+    expect201(r1.status);
+    const { url, bytes } = (await r1.json()) as { url: string; bytes: number };
+    assert.match(url, /^api\/images\/[0-9a-f]{64}\.png$/);
+    assert.equal(bytes, png.length);
+    // The same picture again: same name (stored once).
+    assert.equal(((await (await up(ana, png)).json()) as { url: string }).url, url);
+    const get = (cookie?: string, headers: Record<string, string> = {}) => fetch(`http://127.0.0.1:${PORT}/${url}`, { headers: { ...(cookie ? { cookie } : {}), ...headers } });
+    const mine = await get(ana);
+    assert.equal(mine.status, 200);
+    assert.equal(mine.headers.get('content-type'), 'image/png');
+    assert.match(mine.headers.get('cache-control') ?? '', /private, max-age=31536000, immutable/);
+    assert.deepEqual(new Uint8Array(await mine.arrayBuffer()), png);
+    assert.equal((await get(ana, { 'if-none-match': mine.headers.get('etag')! })).status, 304);
+    // Not Ben's (until he uploads it himself), and nobody's without signing in.
+    assert.equal((await get(ben)).status, 404);
+    assert.equal((await get()).status, 401);
+    expect201((await up(ben, png)).status);
+    assert.equal((await get(ben)).status, 200);
+    // Raster pictures only, not empty, and not too big.
+    assert.equal((await up(ana, '<svg xmlns="http://www.w3.org/2000/svg"/>', 'image/svg+xml')).status, 415);
+    assert.equal((await up(ana, new Uint8Array(0))).status, 400);
+    assert.equal((await up(ana, new Uint8Array(10 * 1024 * 1024 + 1))).status, 413);
+    assert.equal((await fetch(`http://127.0.0.1:${PORT}/api/images/nothash.png`, { headers: { cookie: ana } })).status, 404);
   });
 
   it('serves the app', async () => {

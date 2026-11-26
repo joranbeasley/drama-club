@@ -19,6 +19,8 @@
       "migrations_dir": "migrations"
     }
   ],
+  // Pictures. Created by scripts/ensure-d1.mjs in the deploy workflow if it doesn't exist.
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "dramaclub-media" }],
   // Not secret. Override per environment in the dashboard or with --var. DEV_LOGIN belongs in .dev.vars only.
   "vars": {
     "GOOGLE_CLIENT_ID": "",

@@ -2,6 +2,7 @@
 // Both behave the same, including the version check that stops two tabs overwriting each other.
 import type { GraphJSON } from 'mobile-nodemap';
 import { api, ApiError, type Production, type ProductionSummary } from './api.ts';
+import { withPhotosStored } from './media.ts';
 
 export interface SaveFields {
   graph?: GraphJSON;
@@ -25,8 +26,10 @@ export const serverStore: ProductionStore = {
   list: async () => (await api.get<{ productions: ProductionSummary[] }>('/productions')).productions,
   get: async (id) => (await api.get<{ production: Production }>(`/productions/${id}`)).production,
   async create(title, graph) {
-    const { production } = await api.send<{ production: ProductionSummary }>('POST', `/productions?title=${encodeURIComponent(title)}`, graph);
-    return { ...production, graph };
+    // Photos go to R2 first; the production keeps links to them.
+    const stored = await withPhotosStored(graph);
+    const { production } = await api.send<{ production: ProductionSummary }>('POST', `/productions?title=${encodeURIComponent(title)}`, stored);
+    return { ...production, graph: stored };
   },
   // The map and the title save separately (the server never parses maps); each bumps the version.
   async update(id, f) {
@@ -34,7 +37,7 @@ export const serverStore: ProductionStore = {
     let out: ProductionSummary | undefined;
     const check = f.force ? 'force=1' : `version=${version}`;
     if (f.graph) {
-      out = (await api.send<{ production: ProductionSummary }>('PUT', `/productions/${id}/graph?${check}`, f.graph)).production;
+      out = (await api.send<{ production: ProductionSummary }>('PUT', `/productions/${id}/graph?${check}`, await withPhotosStored(f.graph))).production;
       version = out.version;
     }
     if (f.title !== undefined) {

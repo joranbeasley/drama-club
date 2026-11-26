@@ -2,6 +2,7 @@
 import { authRoute, currentUser } from './auth.ts';
 import type { Env } from './env.ts';
 import { HttpError, json } from './http.ts';
+import { imageRoute } from './images.ts';
 import { productionRoute } from './productions.ts';
 
 const SECURITY = { 'x-content-type-options': 'nosniff', 'referrer-policy': 'strict-origin-when-cross-origin', 'x-frame-options': 'DENY' };
@@ -11,12 +12,18 @@ async function api(req: Request, env: Env, path: string): Promise<Response> {
     await env.DB.prepare('SELECT 1').first();
     return json({ ok: true });
   }
-  // State-changing calls must be JSON: a cross-site form can't send that without a CORS preflight.
-  if (!['GET', 'HEAD', 'DELETE'].includes(req.method) && !(req.headers.get('content-type') ?? '').startsWith('application/json')) {
+  // State-changing calls must be JSON (or, for picture uploads, an image type): a cross-site form
+  // can send neither without a CORS preflight, which we don't answer.
+  const type = req.headers.get('content-type') ?? '';
+  const upload = path === '/images' && type.startsWith('image/');
+  if (!['GET', 'HEAD', 'DELETE'].includes(req.method) && !type.startsWith('application/json') && !upload) {
     throw new HttpError(415, 'Send JSON');
   }
   const user = await currentUser(req, env);
-  const res = (await authRoute(req, env, path, user)) ?? (path.startsWith('/productions') ? await withUser(user, (u) => productionRoute(req, env, path, u)) : undefined);
+  const res =
+    (await authRoute(req, env, path, user)) ??
+    (path.startsWith('/productions') ? await withUser(user, (u) => productionRoute(req, env, path, u)) : undefined) ??
+    (path.startsWith('/images') ? await withUser(user, (u) => imageRoute(req, env, path, u)) : undefined);
   if (!res) throw new HttpError(404, 'Not found');
   return res;
 }
@@ -41,7 +48,7 @@ export default {
       }
     }
     for (const [k, v] of Object.entries(SECURITY)) res.headers.set(k, v);
-    res.headers.set('cache-control', 'no-store');
+    if (!res.headers.has('cache-control')) res.headers.set('cache-control', 'no-store');
     return res;
   },
 } satisfies ExportedHandler<Env>;

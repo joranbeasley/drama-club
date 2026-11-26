@@ -1,5 +1,7 @@
 export interface Env {
   DB: D1Database;
+  /** Pictures (and later clips), named by content hash. */
+  MEDIA: R2Bucket;
   ASSETS: Fetcher;
   GOOGLE_CLIENT_ID?: string;
   ALLOWED_EMAILS?: string;

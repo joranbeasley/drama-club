@@ -18,10 +18,10 @@ npm run dev                       # http://localhost:8787
 
 ## Deploying to Cloudflare
 
-`.github/workflows/deploy.yml` tests every push and deploys `main`: it finds or creates the `dramaclub` D1 database (`scripts/ensure-d1.mjs`), applies migrations and runs `wrangler deploy`. One-time setup:
+`.github/workflows/deploy.yml` tests every push and deploys `main`: it finds or creates the `dramaclub` D1 database and the `dramaclub-media` R2 bucket (`scripts/ensure-d1.mjs`), applies migrations and runs `wrangler deploy`. One-time setup:
 
 1. **Cloudflare.** Sign up (free) and open **Workers & Pages** once so your account gets a `workers.dev` subdomain. Note your **Account ID** (on the Workers & Pages overview, or the account home page).
-2. **API token.** My Profile → API Tokens → Create Token → Custom token, with these **Account** permissions: *Workers Scripts: Edit*, *D1: Edit*, *Account Settings: Read*.
+2. **API token.** My Profile → API Tokens → Create Token → Custom token, with these **Account** permissions: *Workers Scripts: Edit*, *D1: Edit*, *Workers R2 Storage: Edit*, *Account Settings: Read*. R2 must be enabled on the account (R2 in the dashboard; it asks for a payment method, and the free allowance is 10 GB).
 3. **GitHub.** In the repo, Settings → Secrets and variables → Actions:
    - Secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`
    - Variables: `GOOGLE_CLIENT_ID` (below), and optionally `ALLOWED_EMAILS` / `ALLOWED_DOMAINS`
@@ -77,6 +77,8 @@ test/              API tests against the real Worker in wrangler dev, and token 
 **API** (JSON, under `/api`): `GET /config`, `GET /me`, `POST /auth/google {credential}`, `POST /auth/logout`, `GET /productions`, `POST /productions?title=…` (body: the map), `GET /productions/:id`, `PUT /productions/:id/graph?version=N` (body: the map; `force=1` to overwrite), `PATCH /productions/:id {title, version}`, `DELETE /productions/:id`. A map is mobile-nodemap `GraphJSON` (type `drama2`).
 
 **Saving.** Edits save automatically after a short pause. Each save names the version it was based on; if the production was saved elsewhere since (another tab or phone), the server answers `409` and the app offers **Load theirs** or **Keep mine**. A save writes a new set of chunks and switches to it in the same D1 transaction as the version check, so a refused or interrupted save never leaves a half-written map. Offline saves retry with back-off, and closing the tab with unsaved changes asks first.
+
+**Pictures.** Photos are stored in R2, named by the SHA-256 of their content, so each is stored once. A production holds links (`api/images/<hash>.jpg`) instead of the pictures, which keeps it a few KB. The browser uploads new photos when it saves (`client/media.ts`), and a production saved before this moves its photos out the first time it's opened. Pictures are served by the Worker only to people who uploaded them, and cached by the browser for good (the name never changes). **Download as JSON** puts them back inline, so the file works anywhere. SVG drawings stay inline. Browser-only mode keeps everything in the browser as before. Deleting a production leaves its pictures in R2 (another production may use them).
 
 **Image generation.** Picture fields can generate images with Meshy using each user's own API key (account menu → Image generation key), kept in their browser and sent only to Meshy.
 
