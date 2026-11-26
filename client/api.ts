@@ -28,14 +28,15 @@ export class ApiError extends Error {
   }
 }
 
-async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+/** `raw` sends a body that is already JSON text (a production's map), without re-encoding it. */
+async function call<T>(method: string, path: string, body?: unknown, raw?: { text: string; headers?: Record<string, string> }): Promise<T> {
   let res: Response;
   try {
     res = await fetch('api' + path, {
       method,
       credentials: 'same-origin',
-      headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      headers: raw ? { 'Content-Type': 'application/json', ...raw.headers } : body === undefined ? {} : { 'Content-Type': 'application/json' },
+      body: raw ? raw.text : body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
     throw new ApiError(0, 'Can’t reach the server. Check your connection.');
@@ -50,5 +51,9 @@ export const api = {
   get: <T>(path: string) => call<T>('GET', path),
   post: <T = unknown>(path: string, body: unknown) => call<T>('POST', path, body),
   put: <T = unknown>(path: string, body: unknown) => call<T>('PUT', path, body),
+  patch: <T = unknown>(path: string, body: unknown) => call<T>('PATCH', path, body),
+  /** Send a map as the body. */
+  send: <T = unknown>(method: string, path: string, graph: GraphJSON) =>
+    call<T>(method, path, undefined, { text: JSON.stringify(graph), headers: { 'X-Node-Count': String(graph.nodes.length) } }),
   del: (path: string) => call<void>('DELETE', path),
 };

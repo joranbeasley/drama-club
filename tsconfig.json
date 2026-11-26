@@ -12,5 +12,5 @@
     "erasableSyntaxOnly": true,
     "skipLibCheck": true
   },
-  "include": ["server", "client", "test"]
+  "include": ["client", "test"]
 }

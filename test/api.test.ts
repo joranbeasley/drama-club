@@ -1,100 +1,113 @@
-// API tests against a real Postgres. Set TEST_DATABASE_URL to a database the tests may wipe.
+// End-to-end API tests: the real Worker in `wrangler dev`, with a throwaway local D1.
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import type { AddressInfo } from 'node:net';
-import type { Server } from 'node:http';
-import { createApp } from '../server/app.ts';
-import { loadConfig } from '../server/config.ts';
-import { createPool, migrate, type Db } from '../server/db.ts';
-import type { GoogleVerifier } from '../server/auth.ts';
+import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-const url = process.env.TEST_DATABASE_URL;
+const PORT = 8790;
+const base = `http://127.0.0.1:${PORT}/api`;
+let wrangler: ChildProcess;
+const state = mkdtempSync(join(tmpdir(), 'dramaclub-test-'));
 
-describe('api', { skip: !url && 'TEST_DATABASE_URL is not set' }, () => {
-  let db: Db;
-  let server: Server;
-  let base: string;
-  // "Google" accepts tokens of the form good:<sub>:<email>.
-  const verify: GoogleVerifier = async (cred) => {
-    const [ok, sub, email] = cred.split(':');
-    if (ok !== 'good') throw new Error('bad token');
-    return { sub, email, name: email.split('@')[0] };
-  };
+before(async () => {
+  execFileSync('npx', ['wrangler', 'd1', 'migrations', 'apply', 'dramaclub', '--local', '--persist-to', state], { stdio: 'ignore' });
+  wrangler = spawn('npx', ['wrangler', 'dev', '--port', String(PORT), '--ip', '127.0.0.1', '--persist-to', state, '--var', 'DEV_LOGIN:1', '--show-interactive-dev-session=false'], { stdio: 'ignore', detached: true });
+  for (let i = 0; i < 120; i++) {
+    try {
+      if ((await fetch(base + '/health')).ok) return;
+    } catch {
+      /* not up yet */
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  throw new Error('wrangler dev did not start');
+});
+after(() => {
+  if (wrangler.pid) process.kill(-wrangler.pid);
+  rmSync(state, { recursive: true, force: true });
+});
 
-  before(async () => {
-    db = createPool(url!);
-    await db.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public');
-    await migrate(db, () => undefined);
-    const cfg = loadConfig({ DATABASE_URL: url, GOOGLE_CLIENT_ID: 'test', ALLOWED_DOMAINS: 'club.test', NODE_ENV: 'test' });
-    server = createApp(db, cfg, verify).listen(0);
-    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api`;
+const req = async (method: string, path: string, opts: { body?: unknown; raw?: string; cookie?: string; headers?: Record<string, string> } = {}) => {
+  const res = await fetch(base + path, {
+    method,
+    headers: { ...(opts.body !== undefined || opts.raw ? { 'content-type': 'application/json' } : {}), ...(opts.cookie ? { cookie: opts.cookie } : {}), ...opts.headers },
+    body: opts.raw ?? (opts.body !== undefined ? JSON.stringify(opts.body) : undefined),
   });
-  after(async () => {
-    server.close();
-    await db.end();
-  });
+  const text = await res.text();
+  return { status: res.status, body: text ? JSON.parse(text) : undefined, cookie: res.headers.get('set-cookie')?.split(';')[0] };
+};
+const signIn = async (email: string) => {
+  const r = await req('POST', '/auth/dev', { body: { email } });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  return r.cookie!;
+};
+const map = (n: number, extra = '') => ({ version: 1, type: 'drama2', nodes: Array.from({ length: n }, (_, i) => ({ id: `n${i}`, type: 'drama2/prop', x: 0, y: 0, params: { note: extra } })), edges: [] });
+const send = (method: string, path: string, g: ReturnType<typeof map>, cookie: string) =>
+  req(method, path, { raw: JSON.stringify(g), cookie, headers: { 'x-node-count': String(g.nodes.length) } });
 
-  const req = async (method: string, path: string, body?: unknown, cookie?: string) => {
-    const res = await fetch(base + path, {
-      method,
-      headers: { ...(body ? { 'content-type': 'application/json' } : {}), ...(cookie ? { cookie } : {}) },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    const text = await res.text();
-    return { status: res.status, body: text ? JSON.parse(text) : undefined, cookie: res.headers.get('set-cookie')?.split(';')[0] };
-  };
-  const signIn = async (email: string) => {
-    const r = await req('POST', '/auth/google', { credential: `good:${email}:${email}` });
-    assert.equal(r.status, 200);
-    return r.cookie!;
-  };
-
-  it('signs in with Google and only lets allowed domains in', async () => {
-    assert.equal((await req('POST', '/auth/google', { credential: 'nope' })).status, 401);
-    assert.equal((await req('POST', '/auth/google', { credential: 'good:x:x@elsewhere.test' })).status, 403);
-    const cookie = await signIn('ana@club.test');
-    assert.match(cookie, /^dc_session=/);
-    assert.equal((await req('GET', '/me', undefined, cookie)).body.user.email, 'ana@club.test');
+describe('api on workers', () => {
+  it('has sessions', async () => {
     assert.equal((await req('GET', '/me')).body.user, null);
-    assert.equal((await req('POST', '/auth/dev', { email: 'a@b.c' })).status, 404, 'dev login is off');
+    const c = await signIn('ana@club.test');
+    assert.equal((await req('GET', '/me', { cookie: c })).body.user.email, 'ana@club.test');
+    assert.equal((await req('POST', '/auth/google', { body: { credential: 'x' } })).status, 404, 'no client id configured');
+    assert.equal((await req('POST', '/auth/logout', { body: {}, cookie: c })).status, 200);
+    assert.equal((await req('GET', '/me', { cookie: c })).body.user, null);
+    assert.equal((await req('POST', '/auth/dev', { raw: 'email=a@b.c', headers: { 'content-type': 'application/x-www-form-urlencoded' } })).status, 415);
   });
 
   it('keeps productions private to their owner', async () => {
     const ana = await signIn('ana@club.test');
     const ben = await signIn('ben@club.test');
     assert.equal((await req('GET', '/productions')).status, 401);
-    const graph = { version: 1, type: 'drama2', nodes: [{ id: 'c1', type: 'drama2/character', x: 0, y: 0, params: {} }], edges: [] };
-    const made = await req('POST', '/productions', { title: 'Spring', graph }, ana);
-    assert.equal(made.status, 201);
+    const made = await send('POST', `/productions?title=${encodeURIComponent('Spring ✨')}`, map(1), ana);
+    assert.equal(made.status, 201, JSON.stringify(made.body));
     const id = made.body.production.id;
-    assert.equal((await req('GET', '/productions', undefined, ana)).body.productions[0].nodeCount, 1);
-    assert.deepEqual((await req('GET', `/productions/${id}`, undefined, ana)).body.production.graph, graph);
-    assert.equal((await req('GET', `/productions/${id}`, undefined, ben)).status, 404);
-    assert.equal((await req('PUT', `/productions/${id}`, { title: 'Mine', force: true }, ben)).status, 404);
-    assert.equal((await req('DELETE', `/productions/${id}`, undefined, ben)).status, 404);
-    assert.equal((await req('GET', '/productions', undefined, ben)).body.productions.length, 0);
-    assert.equal((await req('GET', '/productions/not-a-uuid', undefined, ana)).status, 404);
-    assert.equal((await req('POST', '/productions', { title: 'x', graph: { nodes: 'no' } }, ana)).status, 400);
+    assert.equal(made.body.production.title, 'Spring ✨');
+    assert.equal((await req('GET', '/productions', { cookie: ana })).body.productions[0].nodeCount, 1);
+    assert.deepEqual((await req('GET', `/productions/${id}`, { cookie: ana })).body.production.graph, map(1));
+    assert.equal((await req('GET', `/productions/${id}`, { cookie: ben })).status, 404);
+    assert.equal((await send('PUT', `/productions/${id}/graph?force=1`, map(3), ben)).status, 404);
+    assert.equal((await req('PATCH', `/productions/${id}`, { body: { title: 'Mine', force: true }, cookie: ben })).status, 404);
+    assert.equal((await req('DELETE', `/productions/${id}`, { cookie: ben })).status, 404);
+    assert.equal((await req('GET', '/productions', { cookie: ben })).body.productions.length, 0);
+    assert.equal((await req('POST', '/productions?title=x', { raw: '[1,2]', cookie: ana })).status, 400);
   });
 
-  it('refuses saves over a newer version unless forced', async () => {
+  it('stores big maps in chunks, with emoji on the boundaries intact', async () => {
     const ana = await signIn('ana@club.test');
-    const { production } = (await req('POST', '/productions', { title: 'Autumn' }, ana)).body;
-    const g = (n: number) => ({ version: 1, nodes: Array.from({ length: n }, (_, i) => ({ id: `n${i}`, type: 'drama2/prop', x: 0, y: 0, params: {} })), edges: [] });
-    const first = await req('PUT', `/productions/${production.id}`, { graph: g(1), version: production.version }, ana);
+    // ~2.5M characters: several chunks, full of surrogate pairs.
+    const big = map(5, '🎬'.repeat(250_000) + 'é');
+    const made = await send('POST', '/productions?title=Big', big, ana);
+    assert.equal(made.status, 201);
+    const back = await req('GET', `/productions/${made.body.production.id}`, { cookie: ana });
+    assert.deepEqual(back.body.production.graph, big);
+  });
+
+  it('refuses saves over a newer version unless forced, and renames', async () => {
+    const ana = await signIn('ana@club.test');
+    const { production: p } = (await send('POST', '/productions?title=Autumn', map(0), ana)).body;
+    const first = await send('PUT', `/productions/${p.id}/graph?version=${p.version}`, map(1), ana);
     assert.equal(first.status, 200);
-    assert.equal(first.body.production.version, production.version + 1);
-    const stale = await req('PUT', `/productions/${production.id}`, { graph: g(2), version: production.version }, ana);
+    assert.equal(first.body.production.version, p.version + 1);
+    const stale = await send('PUT', `/productions/${p.id}/graph?version=${p.version}`, map(2), ana);
     assert.equal(stale.status, 409);
-    assert.equal(stale.body.production.version, production.version + 1);
-    const forced = await req('PUT', `/productions/${production.id}`, { graph: g(2), force: true }, ana);
+    assert.equal(stale.body.production.version, p.version + 1);
+    // The refused save left the stored map alone.
+    assert.deepEqual((await req('GET', `/productions/${p.id}`, { cookie: ana })).body.production.graph, map(1));
+    const forced = await send('PUT', `/productions/${p.id}/graph?force=1`, map(2), ana);
     assert.equal(forced.body.production.nodeCount, 2);
-    assert.equal((await req('DELETE', `/productions/${production.id}`, undefined, ana)).status, 204);
+    const renamed = await req('PATCH', `/productions/${p.id}`, { body: { title: 'Winter', version: forced.body.production.version }, cookie: ana });
+    assert.equal(renamed.body.production.title, 'Winter');
+    assert.equal((await req('PATCH', `/productions/${p.id}`, { body: { title: 'Old', version: 1 }, cookie: ana })).status, 409);
+    assert.equal((await req('DELETE', `/productions/${p.id}`, { cookie: ana })).status, 204);
+    assert.equal((await req('GET', `/productions/${p.id}`, { cookie: ana })).status, 404);
   });
 
-  it('signs out', async () => {
-    const ana = await signIn('ana@club.test');
-    assert.equal((await req('POST', '/auth/logout', {}, ana)).status, 200);
-    assert.equal((await req('GET', '/me', undefined, ana)).body.user, null);
+  it('serves the app', async () => {
+    const res = await fetch(`http://127.0.0.1:${PORT}/`);
+    assert.match(await res.text(), /<title>Drama Club<\/title>/);
   });
 });

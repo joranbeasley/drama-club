@@ -4,28 +4,23 @@
   "private": true,
   "description": "Plan productions as boards of cards: cast, locations, props, shots, scenes and episodes. Built on mobile-nodemap.",
   "type": "module",
-  "engines": {
-    "node": ">=22.18"
-  },
   "scripts": {
     "build": "node scripts/build-client.mjs",
-    "dev": "node scripts/build-client.mjs --watch & node --watch --env-file-if-exists=.env server/index.ts",
-    "start": "node --env-file-if-exists=.env server/index.ts",
-    "migrate": "node --env-file-if-exists=.env server/migrate.ts",
-    "typecheck": "tsc --noEmit",
-    "test": "node --test --experimental-test-isolation=none test/*.test.ts"
+    "dev": "npm run db:local && (node scripts/build-client.mjs --watch & wrangler dev)",
+    "db:local": "wrangler d1 migrations apply dramaclub --local",
+    "deploy": "npm run build && node scripts/ensure-d1.mjs && wrangler d1 migrations apply dramaclub --remote && wrangler deploy",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p worker",
+    "test": "npm run build && node --test --experimental-test-isolation=none test/*.test.ts"
   },
   "dependencies": {
-    "express": "^5.3.0",
-    "google-auth-library": "^11.3.4",
-    "mobile-nodemap": "github:joranbeasley/mobile-nodemap#ccr-2e2febf3-1a89e5",
-    "pg": "^8.23.1"
+    "jose": "^6.2.18",
+    "mobile-nodemap": "github:joranbeasley/mobile-nodemap#ccr-2e2febf3-1a89e5"
   },
   "devDependencies": {
-    "@types/express": "^5.0.6",
+    "@cloudflare/workers-types": "^5.20261125.1",
     "@types/node": "^22.20.7",
-    "@types/pg": "^8.23.1",
     "esbuild": "^0.28.2",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "wrangler": "^4.168.0"
   }
 }

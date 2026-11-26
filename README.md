@@ -1,83 +1,92 @@
 # Drama Club
 
-Plan productions on your phone: cast and costumes, locations, props, shots, scenes and episodes, as tabs of linked cards, with pictures, shot lists and Seedance video scripts. It is the **Drama boards** map from [mobile-nodemap](https://github.com/joranbeasley/mobile-nodemap) (`drama2Graph`) as a standalone app, with **Sign in with Google** and productions kept in **Postgres**.
+Plan productions on your phone: cast and costumes, locations, props, shots, scenes and episodes, as tabs of linked cards, with pictures, shot lists and Seedance video scripts. It is the **Drama boards** map from [mobile-nodemap](https://github.com/joranbeasley/mobile-nodemap) (`drama2Graph`) as a standalone app, with **Sign in with Google**, running on **Cloudflare's free tier**: a Worker serves the app and its API, and productions live in a **D1** database.
+
+Without an account (or with no server at all, as on GitHub Pages) productions are kept in the browser instead.
 
 ## Run it locally
 
-Needs Node 22.18+ and Postgres 14+ (or Docker).
+Needs Node 22.18+. No database to install: `wrangler dev` runs the Worker and a local D1.
 
 ```sh
-npm install                 # also builds mobile-nodemap from GitHub
-docker compose up -d db     # or use your own Postgres
-cp .env.example .env        # DEV_LOGIN=1 is on: sign in with any email, no Google needed
-npm run dev                 # http://localhost:3000, rebuilds the client and restarts the server on change
+npm install                       # also builds mobile-nodemap from GitHub
+cp .dev.vars.example .dev.vars    # DEV_LOGIN=1: sign in with any email on localhost
+npm run dev                       # http://localhost:8787
 ```
 
-The server applies database migrations (`db/migrations/*.sql`) when it starts; `npm run migrate` does it on its own.
+`npm run dev` applies the migrations (`migrations/*.sql`) to the local database, rebuilds the client on change and reloads the Worker.
 
-## Without a server: GitHub Pages and browser storage
+## Deploying to Cloudflare
 
-The app also runs as plain static files. When there is no Drama Club server behind the page (GitHub Pages, any static host), or someone taps **Continue without an account** on the sign-in screen, productions are kept in that browser (IndexedDB, which has room for pictures, unlike `localStorage`'s ~5 MB). Everything works the same (autosave, the example, JSON export and import, the two-tab conflict check), but nothing leaves the device: use **Download as JSON** to back up or move a production, and **Import JSON** to bring it into a signed-in account later.
+`.github/workflows/deploy.yml` tests every push and deploys the default branch: it finds or creates the `dramaclub` D1 database (`scripts/ensure-d1.mjs`), applies migrations and runs `wrangler deploy`. One-time setup:
 
-`.github/workflows/pages.yml` builds `public/` on every push and publishes the default branch to Pages. To turn it on: **Settings → Pages → Build and deployment → Source: GitHub Actions**, then re-run the workflow (or push). The site is `https://<owner>.github.io/drama-club/`. Productions open as `?p=<id>`.
+1. **Cloudflare.** Sign up (free) and open **Workers & Pages** once so your account gets a `workers.dev` subdomain. Note your **Account ID** (on the Workers & Pages overview, or the account home page).
+2. **API token.** My Profile → API Tokens → Create Token → Custom token, with these **Account** permissions: *Workers Scripts: Edit*, *D1: Edit*, *Account Settings: Read*.
+3. **GitHub.** In the repo, Settings → Secrets and variables → Actions:
+   - Secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`
+   - Variables: `GOOGLE_CLIENT_ID` (below), and optionally `ALLOWED_EMAILS` / `ALLOWED_DOMAINS`
+4. Push, or run the **Deploy** workflow. The app is at `https://drama-club.<your-subdomain>.workers.dev` (also shown on the workflow run).
 
-## Google sign-in
+Until the token is set the deploy job is skipped, so pushes stay green. To deploy from your own machine instead: `npx wrangler login && npm run deploy`.
 
-1. In Google Cloud Console → APIs & Services → Credentials, create an **OAuth client ID** of type **Web application**.
-2. Under **Authorized JavaScript origins** add every origin you serve from, e.g. `http://localhost:3000` and `https://dramaclub.example.org`. No redirect URIs are needed.
-3. Put the client id in `GOOGLE_CLIENT_ID`, and remove `DEV_LOGIN`.
-4. Optionally limit who can get in: `ALLOWED_EMAILS=ana@gmail.com,ben@gmail.com` and/or `ALLOWED_DOMAINS=ourschool.org`.
+### Google sign-in
 
-How it works: the page shows Google's button (Google Identity Services). Google hands the browser a signed ID token, which the page posts to `/api/auth/google`. The server verifies it with `google-auth-library` (signature, audience, expiry, verified email), upserts the user and starts a session: an `httpOnly`, `SameSite=Lax` cookie holding a random token, of which only the SHA-256 is stored in `sessions`. No Google client secret is involved.
+1. Google Cloud Console → APIs & Services → Credentials → **Create OAuth client ID**, type **Web application**.
+2. **Authorized JavaScript origins**: `https://drama-club.<your-subdomain>.workers.dev` (and `http://localhost:8787` to try it locally). No redirect URIs.
+3. Put the client id in the `GOOGLE_CLIENT_ID` repository variable and deploy again.
 
-## Configuration
+The page shows Google's button. Google hands the browser a signed ID token, which the page posts to `/api/auth/google`; the Worker checks Google's signature, the audience, expiry and that the email is verified (`worker/google.ts`, using `jose`), applies the allow lists, and starts a session: an `httpOnly`, `SameSite=Lax`, `Secure` cookie holding a random token, of which only the SHA-256 is stored. No client secret is involved.
+
+### Settings
 
 | Variable | | |
 | --- | --- | --- |
-| `DATABASE_URL` | required | Postgres connection string |
-| `GOOGLE_CLIENT_ID` | required unless `DEV_LOGIN=1` | OAuth web client id |
+| `GOOGLE_CLIENT_ID` | empty: no sign-in | OAuth web client id. Without it the app runs browser-only |
 | `ALLOWED_EMAILS`, `ALLOWED_DOMAINS` | empty: anyone | Comma-separated allow lists |
-| `DEV_LOGIN` | off | `1`: email-only sign-in for development. Ignored when `NODE_ENV=production` |
-| `NODE_ENV` | | `production`: secure cookies, trusts one proxy hop (`X-Forwarded-*`) |
-| `PORT` | `3000` | |
-| `SESSION_DAYS` | `30` | |
-| `MAX_BODY` | `20mb` | Largest production accepted. Pictures are stored inside it as compressed data URLs |
+| `SESSION_DAYS` | `30` | In `wrangler.jsonc` |
+| `DEV_LOGIN` | off | `1` in `.dev.vars` only. Works only on `localhost` even if set elsewhere |
 
-## Deploying
+### Free-tier limits
 
-`docker build .` produces a runnable image (`node server/index.ts`, port 3000). Serve it over HTTPS with `NODE_ENV=production`, a `DATABASE_URL` and a `GOOGLE_CLIENT_ID` whose authorized origins include your domain.
+The design keeps well inside them: the Worker never parses a production's JSON (requests use a few ms of the 10 ms CPU allowance), and maps are stored as text in chunks under D1's 2 MB-per-value limit. A production can be up to 24 MB of JSON (pictures are stored inside it as compressed JPEGs, so roughly a hundred or more pictures). D1's free 500 MB per database holds a lot of productions; pictures are what fill it.
+
+## GitHub Pages and browser-only mode
+
+When there is no server behind the page (GitHub Pages, any static host), or someone taps **Continue without an account**, productions are kept in that browser (IndexedDB, which has room for pictures, unlike `localStorage`). Everything works the same, but nothing leaves the device: **Download as JSON** backs up or moves a production, and **Import JSON** brings it into an account later.
+
+`.github/workflows/pages.yml` publishes `public/` to Pages from the default branch (Settings → Pages → Source: GitHub Actions).
 
 ## How it fits together
 
 ```
-client/        browser app, bundled with esbuild into public/app.js
-  main.ts      sign-in, production picker, the NodeEditor (drama2Graph), autosave
-  api.ts       fetch wrapper
-public/        index.html, app.css (and the built app.js)
-server/        Express 5 on Node's built-in TypeScript support (no build step)
-  app.ts       routes, security headers, errors
-  auth.ts      Google ID token check, sessions, /api/me, logout
-  productions.ts  CRUD with optimistic concurrency
-  db.ts        pg pool and the migration runner
-db/migrations/ SQL, applied in order once each
-test/          API tests against a real Postgres
+client/            browser app, bundled with esbuild into public/app.js
+  main.ts          sign-in, production picker, the NodeEditor (drama2Graph), autosave
+  store.ts         where productions live: the API (serverStore) or IndexedDB (localStore)
+  api.ts           fetch wrapper
+public/            index.html, app.css (and the built app.js): served as static assets
+worker/            the Cloudflare Worker: /api/*
+  index.ts         routing, security headers, errors
+  auth.ts          sessions, Google and dev sign-in, /api/me
+  google.ts        ID token verification
+  productions.ts   productions, chunked storage, version checks
+migrations/        D1 schema, applied in order
+scripts/           client build, ensure-d1 (deploy)
+test/              API tests against the real Worker in wrangler dev, and token checks
 ```
 
-**API** (all JSON, all under `/api`): `GET /config`, `GET /me`, `POST /auth/google {credential}`, `POST /auth/logout`, `GET /productions`, `POST /productions {title, graph?}`, `GET|PUT|DELETE /productions/:id`. A production's `graph` is mobile-nodemap `GraphJSON` (type `drama2`).
+**API** (JSON, under `/api`): `GET /config`, `GET /me`, `POST /auth/google {credential}`, `POST /auth/logout`, `GET /productions`, `POST /productions?title=…` (body: the map), `GET /productions/:id`, `PUT /productions/:id/graph?version=N` (body: the map; `force=1` to overwrite), `PATCH /productions/:id {title, version}`, `DELETE /productions/:id`. A map is mobile-nodemap `GraphJSON` (type `drama2`).
 
-**Saving.** Edits save automatically after a short pause. Each save sends the `version` it was based on; if the production was saved elsewhere since (another tab or phone), the server answers `409` and the app offers **Load theirs** or **Keep mine**. Offline saves retry with back-off, and closing the tab with unsaved changes asks first.
-
-**Browser-only mode.** `client/store.ts` has two stores behind one interface: `serverStore` (the API) and `localStore` (IndexedDB), chosen at start-up by probing `api/health`.
+**Saving.** Edits save automatically after a short pause. Each save names the version it was based on; if the production was saved elsewhere since (another tab or phone), the server answers `409` and the app offers **Load theirs** or **Keep mine**. A save writes a new set of chunks and switches to it in the same D1 transaction as the version check, so a refused or interrupted save never leaves a half-written map. Offline saves retry with back-off, and closing the tab with unsaved changes asks first.
 
 **Image generation.** Picture fields can generate images with Meshy using each user's own API key (account menu → Image generation key), kept in their browser and sent only to Meshy.
 
 ## Tests
 
 ```sh
-TEST_DATABASE_URL=postgres://dramaclub:dramaclub@localhost:5432/dramaclub_test npm test   # wipes that database
+npm test            # builds, starts the Worker with a throwaway local D1, runs the API tests
 npm run typecheck
 ```
 
 ## mobile-nodemap version
 
-`package.json` installs the library from GitHub. It currently points at the `ccr-2e2febf3-1a89e5` branch, which adds the `prepare` script that lets npm build it on install; switch it to `#main` once that is merged (`npm i github:joranbeasley/mobile-nodemap`).
+`package.json` installs the library from GitHub, currently from the `ccr-2e2febf3-1a89e5` branch, which adds the `prepare` script that lets npm build it on install. Switch it to `#main` once that is merged (`npm i github:joranbeasley/mobile-nodemap`).

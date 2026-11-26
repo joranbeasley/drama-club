@@ -1,0 +1,5 @@
+# Copy to .dev.vars for `npm run dev`. Never deployed.
+# Sign in with any email on localhost, no Google needed.
+DEV_LOGIN=1
+# To try real Google sign-in locally, set your OAuth client id (with http://localhost:8787 as an authorized origin):
+# GOOGLE_CLIENT_ID=1234-abc.apps.googleusercontent.com

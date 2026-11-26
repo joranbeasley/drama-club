@@ -24,8 +24,25 @@ export const serverStore: ProductionStore = {
   mode: 'server',
   list: async () => (await api.get<{ productions: ProductionSummary[] }>('/productions')).productions,
   get: async (id) => (await api.get<{ production: Production }>(`/productions/${id}`)).production,
-  create: async (title, graph) => (await api.post<{ production: Production }>('/productions', { title, graph })).production,
-  update: async (id, f) => (await api.put<{ production: ProductionSummary }>(`/productions/${id}`, f)).production,
+  async create(title, graph) {
+    const { production } = await api.send<{ production: ProductionSummary }>('POST', `/productions?title=${encodeURIComponent(title)}`, graph);
+    return { ...production, graph };
+  },
+  // The map and the title save separately (the server never parses maps); each bumps the version.
+  async update(id, f) {
+    let version = f.version;
+    let out: ProductionSummary | undefined;
+    const check = f.force ? 'force=1' : `version=${version}`;
+    if (f.graph) {
+      out = (await api.send<{ production: ProductionSummary }>('PUT', `/productions/${id}/graph?${check}`, f.graph)).production;
+      version = out.version;
+    }
+    if (f.title !== undefined) {
+      out = (await api.patch<{ production: ProductionSummary }>(`/productions/${id}`, { title: f.title, ...(f.force && !f.graph ? { force: true } : { version }) })).production;
+    }
+    if (!out) throw new ApiError(400, 'Nothing to save');
+    return out;
+  },
   remove: (id) => api.del(`/productions/${id}`),
 };
 

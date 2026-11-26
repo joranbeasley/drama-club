@@ -1,0 +1,30 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "drama-club",
+  "main": "worker/index.ts",
+  "compatibility_date": "2025-09-01",
+  // The browser app. The Worker answers /api/*; everything else is a static file.
+  "assets": {
+    "directory": "public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "dramaclub",
+      // Filled in by scripts/ensure-d1.mjs in the deploy workflow (it creates the database if needed).
+      // Any value works for `wrangler dev`, which uses a local database.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  // Not secret. Override per environment in the dashboard or with --var. DEV_LOGIN belongs in .dev.vars only.
+  "vars": {
+    "GOOGLE_CLIENT_ID": "",
+    "ALLOWED_EMAILS": "",
+    "ALLOWED_DOMAINS": "",
+    "SESSION_DAYS": "30"
+  },
+  "observability": { "enabled": true }
+}

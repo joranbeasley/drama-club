@@ -3,3 +3,5 @@ public/app.js
 public/app.js.map
 .env
 *.log
+.dev.vars
+.wrangler
