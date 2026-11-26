@@ -1,5 +1,5 @@
-# Deploys the app (Worker + static files + D1 database) to Cloudflare on every push to the
-# default branch. One-time setup, in GitHub → Settings → Secrets and variables → Actions:
+# Deploys the app (Worker + static files + D1 database) to Cloudflare on every push to main.
+# Other branches are tested only. One-time setup, in GitHub → Settings → Secrets and variables → Actions:
 #   Secrets:   CLOUDFLARE_API_TOKEN  (Account: Workers Scripts Edit, D1 Edit, Account Settings Read)
 #              CLOUDFLARE_ACCOUNT_ID
 #   GOOGLE_CLIENT_ID (and optionally ALLOWED_EMAILS, ALLOWED_DOMAINS): as variables or secrets
@@ -29,7 +29,7 @@ jobs:
 
   deploy:
     needs: test
-    if: github.ref_name == github.event.repository.default_branch
+    if: github.ref_name == 'main'
     runs-on: ubuntu-latest
     environment:
       name: production

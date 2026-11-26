@@ -18,7 +18,7 @@ npm run dev                       # http://localhost:8787
 
 ## Deploying to Cloudflare
 
-`.github/workflows/deploy.yml` tests every push and deploys the default branch: it finds or creates the `dramaclub` D1 database (`scripts/ensure-d1.mjs`), applies migrations and runs `wrangler deploy`. One-time setup:
+`.github/workflows/deploy.yml` tests every push and deploys `main`: it finds or creates the `dramaclub` D1 database (`scripts/ensure-d1.mjs`), applies migrations and runs `wrangler deploy`. One-time setup:
 
 1. **Cloudflare.** Sign up (free) and open **Workers & Pages** once so your account gets a `workers.dev` subdomain. Note your **Account ID** (on the Workers & Pages overview, or the account home page).
 2. **API token.** My Profile → API Tokens → Create Token → Custom token, with these **Account** permissions: *Workers Scripts: Edit*, *D1: Edit*, *Account Settings: Read*.
@@ -89,4 +89,4 @@ npm run typecheck
 
 ## mobile-nodemap version
 
-`package.json` installs the library from GitHub, currently from the `ccr-2e2febf3-1a89e5` branch, which adds the `prepare` script that lets npm build it on install. Switch it to `#main` once that is merged (`npm i github:joranbeasley/mobile-nodemap`).
+`package.json` installs the library from GitHub (`github:joranbeasley/mobile-nodemap#main`); npm builds it on install. `package-lock.json` pins the exact commit: run `npm i github:joranbeasley/mobile-nodemap#main` to move to the library's latest `main`.

@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "jose": "^6.2.18",
-    "mobile-nodemap": "github:joranbeasley/mobile-nodemap#ccr-2e2febf3-1a89e5"
+    "mobile-nodemap": "github:joranbeasley/mobile-nodemap#main"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261125.1",
