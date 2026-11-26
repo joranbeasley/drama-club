@@ -2,7 +2,7 @@
 # default branch. One-time setup, in GitHub → Settings → Secrets and variables → Actions:
 #   Secrets:   CLOUDFLARE_API_TOKEN  (Account: Workers Scripts Edit, D1 Edit, Account Settings Read)
 #              CLOUDFLARE_ACCOUNT_ID
-#   Variables: GOOGLE_CLIENT_ID      (and optionally ALLOWED_EMAILS, ALLOWED_DOMAINS)
+#   GOOGLE_CLIENT_ID (and optionally ALLOWED_EMAILS, ALLOWED_DOMAINS): as variables or secrets
 # Until the token is set, the deploy is skipped (tests still run).
 name: Deploy
 
@@ -66,9 +66,9 @@ jobs:
         id: deploy
         if: steps.ready.outputs.ok == 'true'
         env:
-          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
-          ALLOWED_EMAILS: ${{ vars.ALLOWED_EMAILS }}
-          ALLOWED_DOMAINS: ${{ vars.ALLOWED_DOMAINS }}
+          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID || secrets.GOOGLE_CLIENT_ID }}
+          ALLOWED_EMAILS: ${{ vars.ALLOWED_EMAILS || secrets.ALLOWED_EMAILS }}
+          ALLOWED_DOMAINS: ${{ vars.ALLOWED_DOMAINS || secrets.ALLOWED_DOMAINS }}
         run: |
           if [ -z "$GOOGLE_CLIENT_ID" ]; then
             echo "::warning::GOOGLE_CLIENT_ID is not set: the app will work, but only without an account (browser storage)."
