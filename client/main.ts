@@ -10,6 +10,8 @@ import {
   falImageGenerator,
   falVideoGenerator,
   setClipKeeper,
+  setGenerationLog,
+  type GenerationRecord,
   listThemes,
   getTheme,
   GENERATE_EVENT,
@@ -736,6 +738,8 @@ async function startEditing() {
   // Signed in: finished clips are copied into this site's storage (fal's links expire, and the
   // page can't read videos from fal to take their last frame). Browser-only: fal's link as it is.
   setClipKeeper(store.mode === 'server' ? async (url) => (await api.post<{ url: string }>('/clips', { url })).url : null);
+  // What made each picture and clip, for 7 days: on the server when signed in, else in this browser.
+  setGenerationLog(store.mode === 'server' ? serverGenerations : localGenerations);
   productions = await store.list();
   const fromUrl = urlProduction();
   const spot = urlSpot();
@@ -749,6 +753,36 @@ async function startEditing() {
   await open(want, { spot: want === fromUrl ? spot : undefined });
   restoreDraft();
 }
+
+const KEEP_MS = 7 * 86_400_000;
+const serverGenerations = {
+  save(r: GenerationRecord) {
+    if (current) void api.post(`/productions/${current.id}/generations`, r).catch(() => undefined);
+  },
+  async list(node: string, param: string) {
+    if (!current) return [];
+    const q = new URLSearchParams({ node, param });
+    return (await api.get<{ generations: GenerationRecord[] }>(`/productions/${current.id}/generations?${q}`)).generations;
+  },
+};
+/** Browser-only: kept in this browser, the last 7 days (at most 100 per production). */
+const localGenerations = {
+  key: () => `gen:${current?.id ?? ''}`,
+  read(): GenerationRecord[] {
+    try {
+      const all = JSON.parse(local.get(this.key()) ?? '[]') as GenerationRecord[];
+      return all.filter((r) => Date.now() - r.at < KEEP_MS);
+    } catch {
+      return [];
+    }
+  },
+  save(r: GenerationRecord) {
+    if (current) local.set(this.key(), JSON.stringify([...this.read(), r].slice(-100)));
+  },
+  async list(node: string, param: string) {
+    return this.read().filter((r) => r.node === node && r.param === param).reverse();
+  },
+};
 
 /** A draft kept when the session ran out: put it back and save it. */
 function restoreDraft() {

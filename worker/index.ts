@@ -4,6 +4,7 @@ import type { Env } from './env.ts';
 import { HttpError, json } from './http.ts';
 import { agentRoute } from './agent.ts';
 import { clipRoute } from './clips.ts';
+import { generationRoute } from './generations.ts';
 import { imageRoute } from './images.ts';
 import { OPENAPI } from './openapi.ts';
 import { tokenRoute } from './tokens.ts';
@@ -28,6 +29,7 @@ async function api(req: Request, env: Env, path: string): Promise<Response> {
   const user = await currentUser(req, env);
   const res =
     (await authRoute(req, env, path, user)) ??
+    (path.startsWith('/productions') && path.endsWith('/generations') ? await withUser(user, (u) => generationRoute(req, env, path, u)) : undefined) ??
     (path.startsWith('/productions') ? await withUser(user, (u) => agentRoute(req, env, path, u)) : undefined) ??
     (path.startsWith('/productions') ? await withUser(user, (u) => productionRoute(req, env, path, u)) : undefined) ??
     (path.startsWith('/tokens') ? await withUser(user, (u) => tokenRoute(req, env, path, u)) : undefined) ??
