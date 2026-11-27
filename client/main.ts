@@ -4,8 +4,11 @@ import {
   Evaluator,
   NodeEditor,
   drama2Graph,
-  setImageGenerator,
+  setImageGenerators,
+  setVideoGenerators,
   meshyImageGenerator,
+  falImageGenerator,
+  falVideoGenerator,
   listThemes,
   getTheme,
   type GraphJSON,
@@ -103,14 +106,16 @@ function menu(button: HTMLElement, panel: HTMLElement, onPick: (act: string) => 
   document.addEventListener('keydown', (e) => e.key === 'Escape' && !panel.hidden && (close(), button.focus()));
 }
 
-// ------------------------------------------------------------------ image generation
+// ------------------------------------------------------------------ AI generation
 
-// ✨ Generate in picture fields: Meshy text-to-image with the user's own key, kept in this browser.
-setImageGenerator(
-  meshyImageGenerator({
-    key: { label: 'Meshy API key', get: () => local.get('meshy-key'), set: (v) => local.set('meshy-key', v) },
-  }),
-);
+// Each person's own keys, kept in this browser and sent only to that service. ✨ Generate in
+// picture fields offers Meshy and fal (Nano Banana); 🎬 Generate clip on shots uses fal (Seedance).
+const falKey = { label: 'fal API key', get: () => local.get('fal-key'), set: (v: string) => local.set('fal-key', v) };
+setImageGenerators([
+  meshyImageGenerator({ key: { label: 'Meshy API key', get: () => local.get('meshy-key'), set: (v) => local.set('meshy-key', v) } }),
+  falImageGenerator({ key: falKey }),
+]);
+setVideoGenerators([falVideoGenerator({ key: falKey })]);
 
 // ------------------------------------------------------------------ the editor
 
@@ -415,10 +420,16 @@ menu($('#user'), $('#user-menu'), (act) => {
       local.set('mode', null);
       location.href = location.pathname;
     });
-  } else if (act === 'meshy') {
-    const body = html(`<p>Picture fields can generate images with Meshy. Your key stays in this browser and is only sent to Meshy.</p>
-      <label>Meshy API key <input type="password" name="key" autocomplete="off" placeholder="msy_…" value="${esc(local.get('meshy-key') ?? '')}"></label>`);
-    void ask({ title: 'Image generation', body, ok: 'Save' }).then((d) => d && local.set('meshy-key', String(d.get('key')).trim() || null));
+  } else if (act === 'keys') {
+    const body = html(`<p>Your own keys for AI services. They stay in this browser and are only sent to that service, which bills you directly.</p>
+      <label>Meshy API key <small>pictures</small><input type="password" name="meshy" autocomplete="off" placeholder="msy_…" value="${esc(local.get('meshy-key') ?? '')}"></label>
+      <label>fal API key <small>pictures (Nano Banana) and shot clips (Seedance)</small><input type="password" name="fal" autocomplete="off" placeholder="fal key" value="${esc(local.get('fal-key') ?? '')}"></label>
+      <p><a href="https://www.meshy.ai/api" target="_blank" rel="noopener">Get a Meshy key</a> · <a href="https://fal.ai/dashboard/keys" target="_blank" rel="noopener">Get a fal key</a></p>`);
+    void ask({ title: 'AI service keys', body, ok: 'Save' }).then((d) => {
+      if (!d) return;
+      local.set('meshy-key', String(d.get('meshy')).trim() || null);
+      local.set('fal-key', String(d.get('fal')).trim() || null);
+    });
   }
 });
 

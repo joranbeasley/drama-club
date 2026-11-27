@@ -80,7 +80,7 @@ test/              API tests against the real Worker in wrangler dev, and token 
 
 **Pictures.** Photos are stored in R2, named by the SHA-256 of their content, so each is stored once. A production holds links (`api/images/<hash>.jpg`) instead of the pictures, which keeps it a few KB. The browser uploads new photos when it saves (`client/media.ts`), and a production saved before this moves its photos out the first time it's opened. Pictures are served by the Worker only to people who uploaded them, and cached by the browser for good (the name never changes). **Download as JSON** puts them back inline, so the file works anywhere. SVG drawings stay inline. Browser-only mode keeps everything in the browser as before. Deleting a production leaves its pictures in R2 (another production may use them).
 
-**Image generation.** Picture fields can generate images with Meshy using each user's own API key (account menu → Image generation key), kept in their browser and sent only to Meshy.
+**AI generation.** Each person adds their own keys (account menu → **AI service keys…**), kept in their browser and sent only to that service, which bills them directly. **✨ Generate** in picture fields offers **Meshy** or **fal** (Nano Banana 2 / Pro), with the card's reference pictures. **🎬 Generate clip** on a shot's clip field uses **fal** (Seedance 2.0, 2.0 Fast, 2.0 Mini or 2.5): it starts from the shot's own Seedance export (prompt, reference pictures as @Image1…, length, aspect ratio, and the previous clip's last frame when the shot continues), then keeps the clip's link and its last frame on the shot. Dreamina has no public API; use its CLI or the Seedance export for it.
 
 ## Tests
 

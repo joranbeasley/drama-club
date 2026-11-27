@@ -95,6 +95,8 @@ dialog { border: 1px solid var(--line); border-radius: 16px; background: var(--s
 dialog::backdrop { background: rgb(0 0 0 / .35); }
 dialog h2 { margin: 0 0 12px; font-size: 18px; }
 dialog label { display: flex; flex-direction: column; gap: 6px; font-weight: 600; margin-bottom: 12px; }
+dialog label > small { font-weight: 400; color: var(--muted); }
+dialog p a { color: var(--accent); }
 dialog label.choice { flex-direction: row; align-items: flex-start; gap: 10px; font-weight: 500; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
 dialog label.choice:has(input:checked) { border-color: var(--accent); background: var(--surface-2); }
 dialog label.choice small { display: block; color: var(--muted); font-weight: 400; margin-top: 2px; line-height: 1.4; }
