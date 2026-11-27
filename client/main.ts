@@ -135,9 +135,61 @@ function ensureEditor(): NodeEditor {
   const ed = editor;
   ed.on('view', ({ id }) => setSpot({ v: id }));
   ed.on('select', ({ node }) => setSpot({ n: node }));
-  ed.on('sheet', (x) => setSpot(x.node ? { n: x.node, s: x.param ?? 'edit', st: x.title, se: x.event } : { s: undefined, st: undefined, se: undefined }));
+  ed.on('sheet', (x) => {
+    if (x.node) {
+      sheetBack.opened();
+      setSpot({ n: x.node, s: x.param ?? 'edit', st: x.title, se: x.event });
+    } else {
+      setSpot({ s: undefined, st: undefined, se: undefined });
+      sheetBack.closed();
+    }
+  });
+  addEventListener('popstate', () => sheetBack.popped());
   return editor;
 }
+
+/**
+ * Back closes an open sheet (the phone's back gesture too) instead of leaving the page. Opening a
+ * sheet adds a history entry; Back takes it off and closes the sheet; closing it any other way
+ * (Done, the backdrop) takes the entry off too, so history doesn't pile up.
+ */
+const sheetBack = {
+  /** A history entry stands for the open sheet. */
+  entry: false,
+  /** history.back() we called ourselves: its popstate isn't a Back press. */
+  ours: false,
+  opened() {
+    if (!this.entry) this.push();
+  },
+  push() {
+    // Reloaded on a sheet's entry (the browser keeps its state): that entry stands for it again.
+    if ((history.state as { sheet?: boolean } | null)?.sheet) return void (this.entry = true);
+    // The entry below is where you were without the sheet; the new one, with it.
+    const here = location.href;
+    const base = new URL(here);
+    for (const k of ['s', 'st', 'se']) base.searchParams.delete(k);
+    history.replaceState(null, '', base);
+    history.pushState({ sheet: true }, '', here);
+    this.entry = true;
+  },
+  closed() {
+    if (!this.entry) return;
+    // Another sheet may open straight away (one replaces another): then keep the entry.
+    setTimeout(() => {
+      if (!this.entry || document.querySelector('.nm-sheet:not(.nm-choose)')) return;
+      this.entry = false;
+      this.ours = true;
+      history.back();
+    }, 0);
+  },
+  popped() {
+    if (this.ours) return void (this.ours = false);
+    if (!this.entry) return;
+    // Back pressed with a sheet open: close it (the entry is already gone).
+    this.entry = false;
+    editor?.closePalette();
+  },
+};
 
 /**
  * Where you are in a production, kept in the address next to ?p: the board (v), the selected
@@ -156,7 +208,7 @@ function setSpot(patch: Spot) {
   if (spotQuiet) return;
   const u = new URL(location.href);
   for (const [k, v] of Object.entries(patch)) v ? u.searchParams.set(k, v) : u.searchParams.delete(k);
-  if (u.href !== location.href) history.replaceState(null, '', u);
+  if (u.href !== location.href) history.replaceState(history.state, '', u); // keeps a sheet's entry marked
 }
 /** Back to a spot: its board, its card (zoomed to), its sheet. Missing cards and boards are skipped. */
 async function restoreSpot(ed: NodeEditor, spot: Spot) {
@@ -646,7 +698,7 @@ function setUrl(id: string | null) {
   if (u.searchParams.get('p') !== id) for (const k of SPOT_KEYS) u.searchParams.delete(k);
   if (id) u.searchParams.set('p', id);
   else u.searchParams.delete('p');
-  if (u.href !== location.href) history.replaceState(null, '', u);
+  if (u.href !== location.href) history.replaceState(history.state, '', u); // keeps a sheet's entry marked
 }
 
 let serverAvailable = false;
