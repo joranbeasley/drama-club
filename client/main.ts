@@ -12,6 +12,7 @@ import {
   setClipKeeper,
   listThemes,
   getTheme,
+  GENERATE_EVENT,
   type GraphJSON,
 } from 'mobile-nodemap';
 import { api, ApiError, type Production, type ProductionSummary, type User } from './api.ts';
@@ -130,7 +131,49 @@ function ensureEditor(): NodeEditor {
   if (editor) return editor;
   editor = new NodeEditor(canvas, { graph, registry, evaluator, views: drama2Graph.editor?.views, plugins: drama2Graph.editor?.plugins, direction: drama2Graph.editor?.direction });
   applyTheme();
+  // Where you are goes in the address, so a reload (or a shared link) comes back to it.
+  const ed = editor;
+  ed.on('view', ({ id }) => setSpot({ v: id }));
+  ed.on('select', ({ node }) => setSpot({ n: node }));
+  ed.on('sheet', (x) => setSpot(x.node ? { n: x.node, s: x.param ?? 'edit', st: x.title, se: x.event } : { s: undefined, st: undefined, se: undefined }));
   return editor;
+}
+
+/**
+ * Where you are in a production, kept in the address next to ?p: the board (v), the selected
+ * card (n), and an open sheet (s: "edit", or a field such as "images", with its title st and
+ * the event that opened its panel se).
+ */
+type Spot = { v?: string; n?: string; s?: string; st?: string; se?: string };
+const SPOT_KEYS = ['v', 'n', 's', 'st', 'se'] as const;
+/** While a production loads and its spot is put back, the editor's own events don't rewrite it. */
+let spotQuiet = false;
+const urlSpot = (): Spot => {
+  const q = new URLSearchParams(location.search);
+  return Object.fromEntries(SPOT_KEYS.map((k) => [k, q.get(k) ?? undefined]).filter(([, v]) => v)) as Spot;
+};
+function setSpot(patch: Spot) {
+  if (spotQuiet) return;
+  const u = new URL(location.href);
+  for (const [k, v] of Object.entries(patch)) v ? u.searchParams.set(k, v) : u.searchParams.delete(k);
+  if (u.href !== location.href) history.replaceState(null, '', u);
+}
+/** Back to a spot: its board, its card (zoomed to), its sheet. Missing cards and boards are skipped. */
+async function restoreSpot(ed: NodeEditor, spot: Spot) {
+  try {
+    if (spot.v && drama2Graph.editor?.views?.some((v) => v.id === spot.v)) await ed.setView(spot.v);
+    const n = spot.n && graph.nodes.has(spot.n) ? spot.n : undefined;
+    if (n) {
+      ed.select({ node: n });
+      ed.zoomToNode(n, { animate: false });
+      if (spot.s === 'edit') ed.openNodeEditor(n);
+      else if (spot.s) ed.openFieldSheet(n, spot.s, spot.st, spot.se === GENERATE_EVENT ? GENERATE_EVENT : undefined);
+    }
+  } finally {
+    spotQuiet = false;
+    // Write down where it actually ended up (a card that's gone drops out).
+    setSpot({ v: ed.currentView, n: ed.selection.node, ...(spot.s && ed.selection.node === spot.n ? {} : { s: undefined, st: undefined, se: undefined }) });
+  }
 }
 
 const statusEl = $('#status');
@@ -185,13 +228,14 @@ function upsertSummary(p: ProductionSummary) {
 const blankGraph = (): GraphJSON => ({ version: 1, type: drama2Graph.id, nodes: [], edges: [] });
 const exampleGraph = (): GraphJSON => ({ ...structuredClone(drama2Graph.examples![0].graph), type: drama2Graph.id });
 
-async function open(id: string, { fresh = false } = {}) {
+async function open(id: string, { fresh = false, spot }: { fresh?: boolean; spot?: Spot } = {}) {
   await flush();
   hideBanner();
-  show(await store.get(id), fresh);
+  show(await store.get(id), fresh, spot);
 }
 
-function show(p: Production, fresh = false) {
+function show(p: Production, fresh = false, spot?: Spot) {
+  spotQuiet = true;
   current = p;
   dirty = false;
   const ed = ensureEditor();
@@ -209,7 +253,12 @@ function show(p: Production, fresh = false) {
   }
   ed.history?.reset();
   ed.select({});
-  requestAnimationFrame(() => (fresh ? void ed.autoLayout({ animate: false }) : ed.fit()));
+  requestAnimationFrame(() => {
+    if (fresh) void ed.autoLayout({ animate: false });
+    else ed.fit();
+    // Back where the address says (a reload), else at the start.
+    void restoreSpot(ed, spot ?? {});
+  });
   local.set(`last:${store.mode}`, p.id);
   setUrl(p.id);
   renderPicker();
@@ -593,6 +642,8 @@ async function signInAgain() {
 const urlProduction = () => new URLSearchParams(location.search).get('p');
 function setUrl(id: string | null) {
   const u = new URL(location.href);
+  // Another production: where you were in the last one no longer applies.
+  if (u.searchParams.get('p') !== id) for (const k of SPOT_KEYS) u.searchParams.delete(k);
   if (id) u.searchParams.set('p', id);
   else u.searchParams.delete('p');
   if (u.href !== location.href) history.replaceState(null, '', u);
@@ -635,6 +686,7 @@ async function startEditing() {
   setClipKeeper(store.mode === 'server' ? async (url) => (await api.post<{ url: string }>('/clips', { url })).url : null);
   productions = await store.list();
   const fromUrl = urlProduction();
+  const spot = urlSpot();
   const want = [fromUrl, local.get(`last:${store.mode}`), productions[0]?.id].find((id) => id && productions.some((p) => p.id === id));
   if (fromUrl && !want) banner(store.mode === 'local' ? 'That production isn’t saved in this browser.' : 'That production isn’t one of yours, or it was deleted.');
   if (!want) {
@@ -642,7 +694,7 @@ async function startEditing() {
     renderPicker();
     return;
   }
-  await open(want);
+  await open(want, { spot: want === fromUrl ? spot : undefined });
   restoreDraft();
 }
 
