@@ -17,11 +17,14 @@ let served = 0;
 const state = mkdtempSync(join(tmpdir(), 'dramaclub-clips-'));
 // A stand-in "video": 1,000 bytes, each its own index mod 256, to check ranges.
 const VIDEO = Uint8Array.from({ length: 1000 }, (_, i) => i % 256);
+const PNG = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3]);
 
 before(async () => {
   source = createServer((req, res) => {
     served++;
-    if (req.url === '/gone.mp4') return void res.writeHead(404).end();
+    if (req.url === '/gone.mp4' || req.url === '/gone.png') return void res.writeHead(404).end();
+    if (req.url?.startsWith('/pic.png')) return void res.writeHead(200, { 'content-type': 'image/png' }).end(Buffer.from(PNG));
+    if (req.url === '/page.svg') return void res.writeHead(200, { 'content-type': 'image/svg+xml' }).end('<svg/>');
     res.writeHead(200, { 'content-type': 'video/mp4', 'content-length': String(VIDEO.length) }).end(Buffer.from(VIDEO));
   }).listen(0, '127.0.0.1');
   await new Promise((r) => source.once('listening', r));
@@ -86,5 +89,35 @@ describe('clips', () => {
     const gone = await keep(ana, `${sourceUrl}/gone.mp4`);
     assert.equal(gone.status, 502);
     assert.match(((await gone.json()) as { error: string }).error, /may have expired/);
+  });
+});
+
+describe('pictures copied from Meshy and fal', () => {
+  const copy = (cookie: string, url: string) => fetch(origin + '/api/images/copy', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ url }) });
+
+  it('keeps a service picture in R2, like an upload', async () => {
+    const ana = await signIn('ana@club.test');
+    const r = await copy(ana, `${sourceUrl}/pic.png?Expires=1&Signature=x`);
+    assert.equal(r.status, 201);
+    const { url } = (await r.json()) as { url: string };
+    assert.match(url, /^api\/images\/[0-9a-f]{64}\.png$/);
+    const pic = await fetch(`${origin}/${url}`, { headers: { cookie: ana } });
+    assert.equal(pic.headers.get('content-type'), 'image/png');
+    assert.deepEqual(new Uint8Array(await pic.arrayBuffer()), PNG);
+    // The same picture uploaded by hand: the same link.
+    const up = await fetch(origin + '/api/images', { method: 'POST', headers: { 'content-type': 'image/png', cookie: ana }, body: PNG });
+    assert.equal(((await up.json()) as { url: string }).url, url);
+  });
+
+  it('copies pictures only, only from Meshy or fal, and says when a link has expired', async () => {
+    const ana = await signIn('ana@club.test');
+    const no = await copy(ana, 'https://example.test/x.png');
+    assert.equal(no.status, 400);
+    assert.match(((await no.json()) as { error: string }).error, /only be copied from Meshy or fal/);
+    assert.equal((await copy(ana, `${sourceUrl}/page.svg`)).status, 415);
+    const gone = await copy(ana, `${sourceUrl}/gone.png`);
+    assert.equal(gone.status, 502);
+    assert.match(((await gone.json()) as { error: string }).error, /may have expired/);
+    assert.equal((await fetch(origin + '/api/images/copy', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"url":"https://assets.meshy.ai/a.png"}' })).status, 401);
   });
 });
