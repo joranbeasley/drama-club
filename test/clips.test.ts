@@ -24,6 +24,8 @@ before(async () => {
     served++;
     if (req.url === '/gone.mp4' || req.url === '/gone.png') return void res.writeHead(404).end();
     if (req.url?.startsWith('/pic.png')) return void res.writeHead(200, { 'content-type': 'image/png' }).end(Buffer.from(PNG));
+    if (req.url === '/voice.mp3') return void res.writeHead(200, { 'content-type': 'audio/mpeg' }).end(Buffer.from(PNG));
+    if (req.url === '/voice.wav') return void res.writeHead(200, { 'content-type': 'application/octet-stream' }).end(Buffer.from(PNG));
     if (req.url === '/page.svg') return void res.writeHead(200, { 'content-type': 'image/svg+xml' }).end('<svg/>');
     res.writeHead(200, { 'content-type': 'video/mp4', 'content-length': String(VIDEO.length) }).end(Buffer.from(VIDEO));
   }).listen(0, '127.0.0.1');
@@ -78,6 +80,20 @@ describe('clips', () => {
     const before = served;
     assert.equal(((await (await keep(ana, `${sourceUrl}/clip.mp4`)).json()) as { url: string }).url, url);
     assert.equal(served, before);
+  });
+
+  it('keeps sound too (🎙 fixed voices), served as what it is', async () => {
+    const ana = await signIn('ana@club.test');
+    const mp3 = ((await (await keep(ana, `${sourceUrl}/voice.mp3`)).json()) as { url: string }).url;
+    assert.match(mp3, /^api\/clips\/[0-9a-f-]{36}\.mp3$/);
+    const got = await fetch(`${origin}/${mp3}`, { headers: { cookie: ana } });
+    assert.equal(got.headers.get('content-type'), 'audio/mpeg');
+    assert.deepEqual(new Uint8Array(await got.arrayBuffer()), PNG);
+    const wav = ((await (await keep(ana, `${sourceUrl}/voice.wav`)).json()) as { url: string }).url;
+    assert.match(wav, /\.wav$/);
+    assert.equal((await fetch(`${origin}/${wav}`, { headers: { cookie: ana } })).headers.get('content-type'), 'audio/wav');
+    // A picture still isn't kept here.
+    assert.equal((await keep(ana, `${sourceUrl}/page.svg`)).status, 400);
   });
 
   it('copies only from fal (or a local server in development), and says when a link is gone', async () => {

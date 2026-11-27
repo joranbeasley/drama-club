@@ -9,6 +9,8 @@ import {
   meshyImageGenerator,
   falImageGenerator,
   falVideoGenerator,
+  falVoiceTools,
+  setVoiceTools,
   setClipKeeper,
   setGenerationLog,
   type GenerationRecord,
@@ -120,6 +122,8 @@ setImageGenerators([
   falImageGenerator({ key: falKey }),
 ]);
 setVideoGenerators([falVideoGenerator({ key: falKey })]);
+// 🎙 Fix voices: split the sound, find who speaks, change each to their character's voice.
+setVoiceTools(falVoiceTools({ key: falKey }));
 
 // ------------------------------------------------------------------ the editor
 
