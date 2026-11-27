@@ -3,6 +3,7 @@ import { authRoute, currentUser } from './auth.ts';
 import type { Env } from './env.ts';
 import { HttpError, json } from './http.ts';
 import { agentRoute } from './agent.ts';
+import { clipRoute } from './clips.ts';
 import { imageRoute } from './images.ts';
 import { OPENAPI } from './openapi.ts';
 import { tokenRoute } from './tokens.ts';
@@ -30,7 +31,8 @@ async function api(req: Request, env: Env, path: string): Promise<Response> {
     (path.startsWith('/productions') ? await withUser(user, (u) => agentRoute(req, env, path, u)) : undefined) ??
     (path.startsWith('/productions') ? await withUser(user, (u) => productionRoute(req, env, path, u)) : undefined) ??
     (path.startsWith('/tokens') ? await withUser(user, (u) => tokenRoute(req, env, path, u)) : undefined) ??
-    (path.startsWith('/images') ? await withUser(user, (u) => imageRoute(req, env, path, u)) : undefined);
+    (path.startsWith('/images') ? await withUser(user, (u) => imageRoute(req, env, path, u)) : undefined) ??
+    (path.startsWith('/clips') ? await withUser(user, (u) => clipRoute(req, env, path, u)) : undefined);
   if (!res) throw new HttpError(404, 'Not found');
   return res;
 }

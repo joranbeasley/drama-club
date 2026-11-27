@@ -9,6 +9,7 @@ import {
   meshyImageGenerator,
   falImageGenerator,
   falVideoGenerator,
+  setClipKeeper,
   listThemes,
   getTheme,
   type GraphJSON,
@@ -566,6 +567,9 @@ async function startLocal() {
 
 async function startEditing() {
   setState('in');
+  // Signed in: finished clips are copied into this site's storage (fal's links expire, and the
+  // page can't read videos from fal to take their last frame). Browser-only: fal's link as it is.
+  setClipKeeper(store.mode === 'server' ? async (url) => (await api.post<{ url: string }>('/clips', { url })).url : null);
   productions = await store.list();
   const fromUrl = urlProduction();
   const want = [fromUrl, local.get(`last:${store.mode}`), productions[0]?.id].find((id) => id && productions.some((p) => p.id === id));
