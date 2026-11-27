@@ -385,6 +385,69 @@ async function flush() {
 addEventListener('beforeunload', (e) => {
   if (dirty || saving) e.preventDefault();
 });
+
+/**
+ * Pull to refresh, from the top bar. Browsers only do it when the page itself scrolls, and this
+ * one doesn't (the map takes every gesture), so it's done here: drag the bar down past the mark
+ * and let go. Unsaved changes are saved first; if that fails, it doesn't reload.
+ */
+function pullToRefresh(bar: HTMLElement) {
+  const PULL = 70;
+  const pill = document.createElement('div');
+  pill.className = 'ptr';
+  pill.setAttribute('role', 'status');
+  document.body.append(pill);
+  let start: { x: number; y: number; id: number } | undefined;
+  let dy = 0;
+  const show = () => {
+    const d = Math.min(dy, PULL * 1.6);
+    pill.style.transform = `translate(-50%, ${d - 44}px)`;
+    pill.style.opacity = String(Math.min(1, d / PULL));
+    pill.textContent = dy >= PULL ? '↻ Release to refresh' : '↓ Pull to refresh';
+    pill.classList.toggle('ptr-ready', dy >= PULL);
+  };
+  const reset = () => {
+    start = undefined;
+    dy = 0;
+    pill.style.transform = '';
+    pill.style.opacity = '';
+    pill.classList.remove('ptr-ready');
+  };
+  bar.addEventListener('touchstart', (e) => {
+    // Not from the bar's controls (the production list, menus).
+    if (e.touches.length !== 1 || (e.target as Element).closest('select, input, .menu')) return;
+    start = { x: e.touches[0].clientX, y: e.touches[0].clientY, id: e.touches[0].identifier };
+    dy = 0;
+  }, { passive: true });
+  bar.addEventListener('touchmove', (e) => {
+    const t = start && [...e.touches].find((x) => x.identifier === start!.id);
+    if (!t || !start) return;
+    dy = t.clientY - start.y;
+    // Mostly down: it's a pull. Sideways or up: let it be.
+    if (dy < 8 || Math.abs(t.clientX - start.x) > dy) return void ((dy = 0), show());
+    e.preventDefault();
+    show();
+  }, { passive: false });
+  bar.addEventListener('touchend', () => {
+    if (dy < PULL) return reset();
+    pill.textContent = '↻ Saving…';
+    pill.classList.add('ptr-busy');
+    void flush()
+      .then(() => {
+        // A save that failed leaves the changes marked unsaved: don't lose them.
+        if (dirty) throw new Error('your changes aren’t saved yet');
+        pill.textContent = '↻ Refreshing…';
+        location.reload();
+      })
+      .catch((err: Error) => {
+        pill.classList.remove('ptr-busy');
+        reset();
+        setSave('error', `Not refreshed: ${err.message}`);
+      });
+  });
+  bar.addEventListener('touchcancel', reset);
+}
+pullToRefresh(document.querySelector<HTMLElement>('.bar')!);
 document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && dirty && void save());
 
 /** Run an action, showing any error in the banner. */

@@ -107,3 +107,10 @@ dialog label.choice { flex-direction: row; align-items: flex-start; gap: 10px; f
 dialog label.choice:has(input:checked) { border-color: var(--accent); background: var(--surface-2); }
 dialog label.choice small { display: block; color: var(--muted); font-weight: 400; margin-top: 2px; line-height: 1.4; }
 dialog p { color: var(--muted); line-height: 1.5; margin: 0 0 8px; }
+
+/* Pull to refresh (from the top bar): a pill that follows the finger down. */
+.ptr { position: fixed; top: 0; left: 50%; z-index: 50; transform: translate(-50%, -44px); opacity: 0; pointer-events: none;
+  padding: 8px 14px; border-radius: 999px; background: var(--paper, #fff); color: var(--ink); border: 1px solid var(--line, #ddd);
+  box-shadow: 0 4px 16px rgba(0,0,0,.15); font: 600 13px/1 var(--f-ui); white-space: nowrap; }
+.ptr.ptr-ready { color: var(--accent, #3b5bdb); border-color: currentColor; }
+.ptr.ptr-busy { transform: translate(-50%, 16px) !important; opacity: 1 !important; transition: transform .2s; }
