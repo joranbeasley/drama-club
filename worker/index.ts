@@ -2,12 +2,17 @@
 import { authRoute, currentUser } from './auth.ts';
 import type { Env } from './env.ts';
 import { HttpError, json } from './http.ts';
+import { agentRoute } from './agent.ts';
 import { imageRoute } from './images.ts';
+import { OPENAPI } from './openapi.ts';
+import { tokenRoute } from './tokens.ts';
 import { productionRoute } from './productions.ts';
 
 const SECURITY = { 'x-content-type-options': 'nosniff', 'referrer-policy': 'strict-origin-when-cross-origin', 'x-frame-options': 'DENY' };
 
 async function api(req: Request, env: Env, path: string): Promise<Response> {
+  // The agent API's description: public, no sign-in needed.
+  if (path === '/openapi.json' && req.method === 'GET') return json(OPENAPI);
   if (path === '/health') {
     await env.DB.prepare('SELECT 1').first();
     return json({ ok: true });
@@ -22,7 +27,9 @@ async function api(req: Request, env: Env, path: string): Promise<Response> {
   const user = await currentUser(req, env);
   const res =
     (await authRoute(req, env, path, user)) ??
+    (path.startsWith('/productions') ? await withUser(user, (u) => agentRoute(req, env, path, u)) : undefined) ??
     (path.startsWith('/productions') ? await withUser(user, (u) => productionRoute(req, env, path, u)) : undefined) ??
+    (path.startsWith('/tokens') ? await withUser(user, (u) => tokenRoute(req, env, path, u)) : undefined) ??
     (path.startsWith('/images') ? await withUser(user, (u) => imageRoute(req, env, path, u)) : undefined);
   if (!res) throw new HttpError(404, 'Not found');
   return res;

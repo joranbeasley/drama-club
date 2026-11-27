@@ -420,6 +420,8 @@ menu($('#user'), $('#user-menu'), (act) => {
       local.set('mode', null);
       location.href = location.pathname;
     });
+  } else if (act === 'tokens') {
+    void run(showTokens);
   } else if (act === 'keys') {
     const body = html(`<p>Your own keys for AI services. They stay in this browser and are only sent to that service, which bills you directly.</p>
       <label>Meshy API key <small>pictures</small><input type="password" name="meshy" autocomplete="off" placeholder="msy_…" value="${esc(local.get('meshy-key') ?? '')}"></label>
@@ -432,6 +434,36 @@ menu($('#user'), $('#user-menu'), (act) => {
     });
   }
 });
+
+/** API tokens for agents and scripts: list, make (shown once) and revoke. */
+async function showTokens() {
+  if (store.mode !== 'server') {
+    banner('API tokens need an account: sign in to use them.');
+    return;
+  }
+  const { tokens } = await api.get<{ tokens: { id: string; name: string; createdAt: string; lastUsedAt: string | null }[] }>('/tokens');
+  const when = (t: string | null) => (t ? new Date(t).toLocaleDateString() : 'never');
+  const body = html(`<p>Agents and scripts can set up your productions with a token: <code>Authorization: Bearer dc_…</code>.
+      See <a href="agents.md" target="_blank" rel="noopener">the guide</a> and <a href="api/openapi.json" target="_blank" rel="noopener">the API description</a>.</p>
+    <ul class="tokens">${tokens.map((t) => `<li><span><b>${esc(t.name)}</b><small>made ${when(t.createdAt)} · last used ${when(t.lastUsedAt)}</small></span><button type="button" class="btn" data-revoke="${esc(t.id)}">Revoke</button></li>`).join('') || '<li><small>No tokens yet.</small></li>'}</ul>
+    <label>New token name <input type="text" name="name" maxlength="80" placeholder="e.g. Claude, my laptop"></label>`);
+  body.querySelectorAll<HTMLButtonElement>('[data-revoke]').forEach((b) =>
+    b.addEventListener('click', () =>
+      void run(async () => {
+        await api.del(`/tokens/${b.dataset.revoke}`);
+        b.closest('li')!.remove();
+      }),
+    ),
+  );
+  const d = await ask({ title: 'API tokens', body, ok: 'Make token' });
+  if (!d) return;
+  const made = await api.post<{ token: string; name: string }>('/tokens', { name: String(d.get('name') ?? '').trim() });
+  const shown = html(`<p>Copy it now: it won't be shown again. Anyone with it can change your productions, so keep it private, and revoke it here if it leaks.</p>
+    <label>${esc(made.name)} <input type="text" name="token" readonly value="${esc(made.token)}"></label>`);
+  const input = shown.querySelector('input')!;
+  void navigator.clipboard?.writeText(made.token).then(() => (input.title = 'Copied'), () => undefined);
+  await ask({ title: 'Your new API token', body: shown, ok: 'Done' });
+}
 
 let gsiLoaded: Promise<void> | undefined;
 interface Gsi {

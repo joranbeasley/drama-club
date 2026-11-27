@@ -11,7 +11,7 @@ const CHUNK = 600_000;
 export const MAX_GRAPH = 40 * CHUNK;
 
 const SUMMARY = `id, title, version, created_at AS createdAt, updated_at AS updatedAt, node_count AS nodeCount`;
-interface Summary {
+export interface Summary {
   id: string;
   title: string;
   version: number;
@@ -48,7 +48,42 @@ async function readGraph(req: Request): Promise<{ text: string; nodeCount: numbe
   return { text, nodeCount: Math.max(0, Math.min(1e6, Number(req.headers.get('x-node-count')) || 0)) };
 }
 
-const isId = (s: string) => /^[0-9a-f-]{36}$/.test(s);
+export const isId = (s: string) => /^[0-9a-f-]{36}$/.test(s);
+
+/** A production's summary and its stored map (as text), or undefined if it isn't the user's. */
+export async function loadProduction(db: D1Database, userId: number, id: string): Promise<{ meta: Summary; text: string } | undefined> {
+  if (!isId(id)) return undefined;
+  const meta = await db.prepare(`SELECT ${SUMMARY} FROM productions WHERE id = ? AND owner_id = ?`).bind(id, userId).first<Summary>();
+  if (!meta) return undefined;
+  const { results } = await db
+    .prepare('SELECT data FROM production_chunks WHERE production_id = ? AND gen = (SELECT gen FROM productions WHERE id = ?) ORDER BY seq')
+    .bind(id, id)
+    .all<{ data: string }>();
+  return { meta, text: results.map((r) => r.data).join('') || '{"version":1,"type":"drama2","nodes":[],"edges":[]}' };
+}
+
+/**
+ * Save a map over `version` (or whatever is there, with `version: null`). New chunks, the version
+ * check and the switch-over happen in one transaction: if the version moved on meanwhile,
+ * nothing changes and the new chunks go with it. Returns the new summary, or null on a conflict.
+ */
+export async function saveProduction(db: D1Database, userId: number, id: string, text: string, nodeCount: number, version: number | null): Promise<Summary | null> {
+  if (text.length > MAX_GRAPH) throw new HttpError(413, `That production is too big to save (${Math.round(text.length / 1e6)} MB; the limit is ${MAX_GRAPH / 1e6} MB)`);
+  const gen = crypto.randomUUID();
+  const parts = chunks(text);
+  const results = await db.batch([
+    ...parts.map((c, i) => db.prepare('INSERT INTO production_chunks (production_id, gen, seq, data) VALUES (?, ?, ?, ?)').bind(id, gen, i, c)),
+    db
+      .prepare(
+        `UPDATE productions SET gen = ?, version = version + 1, node_count = ?, bytes = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ')
+         WHERE id = ? AND owner_id = ? AND (? OR version = ?)`,
+      )
+      .bind(gen, nodeCount, text.length, id, userId, version === null ? 1 : 0, version ?? 0),
+    db.prepare('DELETE FROM production_chunks WHERE production_id = ? AND gen <> (SELECT gen FROM productions WHERE id = ?)').bind(id, id),
+  ]);
+  if (results[parts.length].meta.changes !== 1) return null;
+  return db.prepare(`SELECT ${SUMMARY} FROM productions WHERE id = ? AND owner_id = ?`).bind(id, userId).first<Summary>();
+}
 
 export async function productionRoute(req: Request, env: Env, path: string, user: User): Promise<Response | undefined> {
   const db = env.DB;
@@ -85,13 +120,10 @@ export async function productionRoute(req: Request, env: Env, path: string, user
 
   // Open: the summary with the stored map spliced in, unparsed.
   if (!graphPath && m === 'GET') {
-    const meta = await mustOwn(id);
-    const { results } = await db
-      .prepare('SELECT data FROM production_chunks WHERE production_id = ? AND gen = (SELECT gen FROM productions WHERE id = ?) ORDER BY seq')
-      .bind(id, id)
-      .all<{ data: string }>();
-    const head = JSON.stringify({ production: meta }).slice(0, -2); // drop the closing "}}"
-    const body = `${head},"graph":${results.map((r) => r.data).join('') || '{"nodes":[],"edges":[]}'}}}`;
+    const p = await loadProduction(db, user.id, id);
+    if (!p) throw new HttpError(404, 'No such production');
+    const head = JSON.stringify({ production: p.meta }).slice(0, -2); // drop the closing "}}"
+    const body = `${head},"graph":${p.text}}}`;
     return new Response(body, { headers: { 'content-type': 'application/json; charset=utf-8' } });
   }
 
@@ -104,22 +136,9 @@ export async function productionRoute(req: Request, env: Env, path: string, user
     const version = Number(url.searchParams.get('version'));
     if (!force && !Number.isInteger(version)) throw new HttpError(400, 'Send the version you are saving over');
     const { text, nodeCount } = await readGraph(req);
-    const gen = crypto.randomUUID();
-    const parts = chunks(text);
-    const results = await db.batch([
-      ...parts.map((c, i) => db.prepare('INSERT INTO production_chunks (production_id, gen, seq, data) VALUES (?, ?, ?, ?)').bind(id, gen, i, c)),
-      db
-        .prepare(
-          `UPDATE productions SET gen = ?, version = version + 1, node_count = ?, bytes = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ')
-           WHERE id = ? AND owner_id = ? AND (? OR version = ?)`,
-        )
-        .bind(gen, nodeCount, text.length, id, user.id, force ? 1 : 0, version),
-      db.prepare('DELETE FROM production_chunks WHERE production_id = ? AND gen <> (SELECT gen FROM productions WHERE id = ?)').bind(id, id),
-    ]);
-    if (results[parts.length].meta.changes !== 1) {
-      throw new HttpError(409, 'This production was changed somewhere else since you opened it', { production: await summary(id) });
-    }
-    return json({ production: await summary(id) });
+    const saved = await saveProduction(db, user.id, id, text, nodeCount, force ? null : version);
+    if (!saved) throw new HttpError(409, 'This production was changed somewhere else since you opened it', { production: await summary(id) });
+    return json({ production: saved });
   }
 
   // Rename: PATCH /productions/:id { title, version | force }
@@ -137,6 +156,8 @@ export async function productionRoute(req: Request, env: Env, path: string, user
   }
 
   if (!graphPath && m === 'DELETE') {
+    // A whole production goes only from the app: a leaked token can't wipe one out.
+    if (user.via === 'token') throw new HttpError(403, 'Productions can only be deleted in the app');
     await mustOwn(id);
     await db.prepare('DELETE FROM productions WHERE id = ? AND owner_id = ?').bind(id, user.id).run();
     return new Response(null, { status: 204 });

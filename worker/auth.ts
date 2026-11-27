@@ -2,12 +2,15 @@ import { emailAllowed } from './allow.ts';
 import type { Env } from './env.ts';
 import { verifyGoogleToken } from './google.ts';
 import { HttpError, json, readCookie, readJson, sha256hex } from './http.ts';
+import { tokenUser } from './tokens.ts';
 
 export interface User {
   id: number;
   email: string;
   name: string;
   picture: string | null;
+  /** How the request signed in: the app's session cookie, or an API token. */
+  via?: 'session' | 'token';
 }
 
 const COOKIE = 'dc_session';
@@ -19,14 +22,16 @@ function cookie(req: Request, value: string, maxAge: number) {
 }
 
 export async function currentUser(req: Request, env: Env): Promise<User | null> {
+  if (req.headers.has('authorization')) return tokenUser(req, env);
   const token = readCookie(req, COOKIE);
   if (!token) return null;
-  return env.DB.prepare(
+  const user = await env.DB.prepare(
     `SELECT u.id, u.email, u.name, u.picture FROM sessions s JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = ? AND s.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ')`,
   )
     .bind(await sha256hex(token))
     .first<User>();
+  return user && { ...user, via: 'session' };
 }
 
 async function startSession(req: Request, env: Env, userId: number): Promise<Response> {
